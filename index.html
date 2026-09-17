@@ -335,7 +335,7 @@ function renderEPI(){
   const manquements = epis.filter(e=>e.nom_prenom!=='RAS');
   const EPI_TYPES = ['Gants','Gilet haute visibilité','Chaussures de sécurité','Gants + Gilet','Gants + Chaussures','Gilet + Chaussures','Tout manquant'];
 
-  if(S.epiValide){
+  if(S.epiValide && !S.agent.est_responsable){
     return `<div class="card">
       <div class="card-title">🦺 Contrôle EPI — ${fmtDate(S.date)}</div>
       <div style="background:var(--vert-pale);border-radius:10px;padding:12px;text-align:center;color:var(--vert);font-weight:700;margin-bottom:12px">✅ EPI validés — Saisie verrouillée 🔒</div>
@@ -350,7 +350,7 @@ function renderEPI(){
 
   return `<div class="card">
     <div class="card-title">🦺 Contrôle EPI — ${fmtDate(S.date)}</div>
-    <div class="info-banner">Coche les agents avec EPI manquant. Laisse tout décoché si tout le monde est conforme (RAS).</div>
+    ${S.epiValide?`<div style="background:var(--orange-pale);border-radius:10px;padding:10px 14px;font-size:13px;color:var(--orange);margin-bottom:12px;font-weight:600">⚠️ EPI déjà validés par le chef d'équipe — Modification admin</div>`:`<div class="info-banner">Coche les agents avec EPI manquant. Laisse tout décoché si tout le monde est conforme (RAS).</div>`}
     ${personnel.map(nom=>{
       const epi = manquements.find(e=>e.nom_prenom===nom);
       return `<div style="padding:10px 0;border-bottom:1px solid var(--gris)">
