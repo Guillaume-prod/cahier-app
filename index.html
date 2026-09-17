@@ -168,7 +168,7 @@ function render(){
   let content = '';
   if(S.vue==='epi') content = renderEPI();
   else if(S.vue==='code') content = renderChangerCode();
-  else if(!S.epiValide) content = renderEPIBlocage();
+  else if(!S.epiValide && !S.agent.est_responsable) content = renderEPIBlocage();
   else if(S.vue==='chantiers') content = renderChantiers();
   else if(S.vue==='colis') content = renderColis();
   else if(S.vue==='pdf') content = renderPDF();
@@ -520,7 +520,7 @@ async function finVacation(){
 }
 
 async function setVue(v){
-  if(!S.epiValide && v!=='epi' && v!=='code'){ toast("Valide d'abord les EPI avant de continuer",'err'); return; }
+  if(!S.epiValide && v!=='epi' && v!=='code' && !S.agent.est_responsable){ toast("Valide d'abord les EPI avant de continuer",'err'); return; }
   S.vue = v; render();
 }
 
