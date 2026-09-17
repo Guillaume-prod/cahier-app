@@ -1,0 +1,607 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="mobile-web-app-capable" content="yes" />
+<title>Cahier de Vacation — MLH</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+:root{
+  --bleu:#1a56a0;--bleu-clair:#e8f0fb;--vert:#16a34a;--vert-pale:#dcfce7;
+  --rouge:#dc2626;--rouge-pale:#fee2e2;--orange:#d97706;--orange-pale:#fef3c7;
+  --gris:#f4f6f9;--gris-bord:#dde3ed;--texte:#1a1f2e;--texte-doux:#5a6478;
+}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--gris);color:var(--texte);min-height:100vh;padding-bottom:80px;}
+#app{max-width:480px;margin:0 auto;padding:16px;}
+
+/* LOGIN */
+.login-screen{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;padding:20px;}
+.login-logo{width:72px;height:72px;background:var(--bleu);border-radius:20px;display:flex;align-items:center;justify-content:center;font-size:36px;margin-bottom:16px;}
+.login-title{font-size:22px;font-weight:800;color:var(--bleu);margin-bottom:4px;}
+.login-sub{font-size:13px;color:var(--texte-doux);margin-bottom:24px;}
+.login-card{background:white;border-radius:16px;padding:24px;width:100%;max-width:340px;box-shadow:0 4px 20px rgba(0,0,0,0.1);}
+.login-error{display:none;color:var(--rouge);font-size:13px;margin-top:8px;text-align:center;}
+
+/* CARDS */
+.card{background:white;border-radius:14px;padding:16px;margin-bottom:14px;box-shadow:0 2px 8px rgba(0,0,0,0.07);}
+.card-title{font-size:12px;font-weight:700;color:var(--texte-doux);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:12px;}
+
+/* FORMS */
+.form-group{margin-bottom:14px;}
+.form-label{display:block;font-size:12px;font-weight:700;color:var(--texte-doux);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.04em;}
+.form-input{width:100%;padding:11px 14px;border:1.5px solid var(--gris-bord);border-radius:10px;font-size:14px;font-family:inherit;background:white;color:var(--texte);outline:none;transition:border-color 0.2s;}
+.form-input:focus{border-color:var(--bleu);}
+select.form-input{cursor:pointer;}
+
+/* BUTTONS */
+.btn-primary{width:100%;padding:13px;background:var(--bleu);color:white;border:none;border-radius:12px;font-size:15px;font-weight:700;cursor:pointer;transition:opacity 0.2s;}
+.btn-primary:active{opacity:0.85;}
+.btn-secondary{width:100%;padding:11px;background:var(--gris);color:var(--texte);border:none;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer;margin-top:8px;}
+.btn-ok{padding:8px 16px;background:var(--vert-pale);color:var(--vert);border:2px solid var(--vert);border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;}
+.btn-nok{padding:8px 16px;background:var(--rouge-pale);color:var(--rouge);border:2px solid var(--rouge);border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;}
+.btn-add{padding:8px 14px;background:var(--bleu-clair);color:var(--bleu);border:1.5px solid var(--bleu);border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;margin-top:8px;}
+
+/* NAV */
+.bottom-nav{position:fixed;bottom:0;left:0;right:0;background:white;border-top:1px solid var(--gris-bord);display:flex;z-index:100;}
+.nav-item{flex:1;display:flex;flex-direction:column;align-items:center;padding:10px 4px 12px;cursor:pointer;font-size:10px;font-weight:600;color:var(--texte-doux);border:none;background:none;}
+.nav-item.active{color:var(--bleu);}
+.nav-item span{font-size:22px;margin-bottom:2px;}
+
+/* BADGES */
+.badge{padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;display:inline-block;}
+.badge-ok{background:var(--vert-pale);color:var(--vert);}
+.badge-nok{background:var(--rouge-pale);color:var(--rouge);}
+.badge-matin{background:#e0f2fe;color:#0369a1;}
+.badge-soiree{background:#ede9fe;color:#7c3aed;}
+
+/* STATS */
+.stat-box{padding:12px;border-radius:10px;text-align:center;flex:1;}
+.stat-box.ok{background:var(--vert-pale);border:1.5px solid var(--vert);}
+.stat-box.nok{background:var(--rouge-pale);border:1.5px solid var(--rouge);}
+.stat-box.info{background:var(--bleu-clair);border:1.5px solid var(--bleu);}
+.stat-val{font-size:22px;font-weight:800;}
+.stat-label{font-size:11px;font-weight:600;margin-top:2px;}
+
+/* TABLE */
+.table-suivi{width:100%;border-collapse:collapse;font-size:12px;margin-top:8px;}
+.table-suivi th{background:var(--bleu);color:white;padding:7px 6px;text-align:center;}
+.table-suivi th:first-child{text-align:left;}
+.table-suivi td{padding:7px 6px;border-bottom:1px solid var(--gris);text-align:center;}
+.table-suivi td:first-child{text-align:left;}
+.table-suivi tr:nth-child(even){background:#f8fafc;}
+.table-suivi .total-row{background:var(--bleu);color:white;font-weight:700;}
+
+.info-banner{background:var(--bleu-clair);border-radius:10px;padding:10px 14px;font-size:13px;color:var(--bleu);margin-bottom:12px;}
+.empty-state{text-align:center;padding:30px 20px;color:var(--texte-doux);}
+.empty-icon{font-size:36px;margin-bottom:8px;}
+
+/* SECTION HEADER */
+.section-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;}
+.section-title{font-size:16px;font-weight:700;}
+
+/* CONTROLE */
+.controle-block{background:var(--gris);border-radius:10px;padding:12px;margin-bottom:10px;}
+.controle-num{font-size:12px;font-weight:700;color:var(--bleu);margin-bottom:8px;text-transform:uppercase;}
+.tournee-row{display:grid;grid-template-columns:24px 1fr 60px;gap:6px;align-items:center;margin-bottom:6px;}
+
+/* TOAST */
+.toast{position:fixed;top:20px;left:50%;transform:translateX(-50%);padding:10px 20px;border-radius:10px;font-size:14px;font-weight:600;z-index:999;animation:fadeInOut 3s ease forwards;}
+@keyframes fadeInOut{0%{opacity:0;transform:translateX(-50%) translateY(-10px)}15%{opacity:1;transform:translateX(-50%) translateY(0)}85%{opacity:1}100%{opacity:0}}
+.toast.ok{background:#16a34a;color:white;}
+.toast.err{background:#dc2626;color:white;}
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script>
+const SUPABASE_URL = 'https://rohecdjlnxiaeitdlwnq.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_EmFdmGfuy4cw4MaAPWTVWw_LRdB_tZz';
+
+const TRANCHES_MATIN = ['00h00 - 01h00','01h00 - 02h00','02h00 - 03h00','03h00 - 04h00','04h00 - 05h00','05h00 - 06h00','06h00 - 07h00','07h00 - 08h00'];
+const TRANCHES_SOIREE = ['15h00 - 16h00','17h00 - 18h00','18h00 - 19h00','19h00 - 20h00','20h00 - 21h00','21h00 - 22h00','22h00 - 23h00','23h00 - 00h00','00h00 - 01h00'];
+const OBJECTIF_COLIS = 2400;
+
+let S = {
+  agent: null, vue: 'chantiers', loading: false,
+  vacationId: null, date: new Date().toISOString().split('T')[0],
+  controles: [], colisData: [], epiData: [],
+  toutesVacations: [], adminVue: 'liste',
+};
+
+// ── DB ──────────────────────────────────────────────────────────
+async function sbFetch(method, path, body){
+  const opts = {method, headers:{'apikey':SUPABASE_KEY,'Authorization':`Bearer ${SUPABASE_KEY}`,'Content-Type':'application/json','Prefer':'return=representation'}};
+  if(body) opts.body = JSON.stringify(body);
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, opts);
+  const t = await res.text();
+  if(!res.ok) throw new Error(t);
+  return t ? JSON.parse(t) : [];
+}
+const db = {
+  get: (t,q='') => sbFetch('GET', `${t}?${q}`),
+  post: (t,b) => sbFetch('POST', t, b),
+  patch: (t,q,b) => sbFetch('PATCH', `${t}?${q}`, b),
+  del: (t,q) => sbFetch('DELETE', `${t}?${q}`),
+};
+
+// ── UTILS ──────────────────────────────────────────────────────
+function toast(msg, type='ok'){
+  const el = document.createElement('div');
+  el.className = `toast ${type}`;
+  el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(()=>el.remove(), 3000);
+}
+function fmtDate(d){ return new Date(d).toLocaleDateString('fr-FR',{weekday:'long',day:'2-digit',month:'long',year:'numeric'}); }
+function fmtHeure(iso){ if(!iso) return '—'; const d=new Date(iso.endsWith('Z')?iso:iso+'Z'); return d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}); }
+function getToday(){ return new Date().toISOString().split('T')[0]; }
+
+function calcMoyenneColis(){
+  const data = S.colisData.filter(c=>c.quantite_colis&&c.heure_controle);
+  if(data.length < 2) return null;
+  const sorted = [...data].sort((a,b)=>a.heure_controle.localeCompare(b.heure_controle));
+  const first = sorted[0], last = sorted[sorted.length-1];
+  const [fh,fm] = first.heure_controle.split(':').map(Number);
+  const [lh,lm] = last.heure_controle.split(':').map(Number);
+  let dureeMin = (lh*60+lm)-(fh*60+fm);
+  if(dureeMin<=0) dureeMin+=24*60;
+  if(dureeMin===0) return null;
+  const totalColis = last.quantite_colis - first.quantite_colis;
+  if(totalColis<=0) return Math.round((last.quantite_colis/dureeMin)*60);
+  return Math.round((totalColis/dureeMin)*60);
+}
+
+// ── RENDER ─────────────────────────────────────────────────────
+function render(){
+  const app = document.getElementById('app');
+  if(!S.agent){ app.innerHTML = renderLogin(); return; }
+  if(S.loading){ app.innerHTML = `<div style="text-align:center;padding:60px;color:var(--texte-doux)">⏳ Chargement...</div>`; return; }
+  
+  const nav = S.agent.est_responsable
+    ? [['chantiers','📋','Chantiers'],['colis','📦','Colis/h'],['epi','🦺','EPI'],['admin','⚙️','Admin']]
+    : [['chantiers','📋','Chantiers'],['colis','📦','Colis/h'],['epi','🦺','EPI']];
+  
+  let content = '';
+  if(S.vue==='chantiers') content = renderChantiers();
+  else if(S.vue==='colis') content = renderColis();
+  else if(S.vue==='epi') content = renderEPI();
+  else if(S.vue==='admin') content = renderAdmin();
+  
+  app.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;padding-top:8px">
+      <div>
+        <div style="font-size:18px;font-weight:800;color:var(--bleu)">📓 Cahier MLH</div>
+        <div style="font-size:12px;color:var(--texte-doux)">${S.agent.prenom} ${S.agent.nom} ${S.agent.equipe?'· '+S.agent.equipe:''}</div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-size:12px;color:var(--texte-doux)">${fmtDate(S.date).split(' ').slice(0,2).join(' ')}</div>
+        <button onclick="deconnexion()" style="font-size:11px;color:var(--rouge);background:none;border:none;cursor:pointer;padding:0">Déconnexion</button>
+      </div>
+    </div>
+    ${content}
+    <nav class="bottom-nav">
+      ${nav.map(([v,i,l])=>`<button class="nav-item ${S.vue===v?'active':''}" onclick="setVue('${v}')"><span>${i}</span>${l}</button>`).join('')}
+    </nav>`;
+}
+
+function renderLogin(){
+  return `<div class="login-screen">
+    <div class="login-logo">📓</div>
+    <div class="login-title">Cahier de Vacation</div>
+    <div class="login-sub">La Poste Mulhouse — MLH</div>
+    <div class="login-card">
+      <div class="form-group">
+        <label class="form-label">Prénom</label>
+        <input class="form-input" id="login-prenom" type="text" placeholder="Votre prénom" autocomplete="off" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Code d'accès</label>
+        <input class="form-input" id="login-code" type="password" placeholder="••••" />
+      </div>
+      <button class="btn-primary" onclick="connexion()">Se connecter</button>
+      <div class="login-error" id="login-error">Prénom ou code incorrect</div>
+    </div>
+  </div>`;
+}
+
+// ── CHANTIERS ──────────────────────────────────────────────────
+function renderChantiers(){
+  const controles = S.controles;
+  const html = [`<div class="card">
+    <div class="card-title">📋 Vérification des chantiers</div>
+    <div class="info-banner">3 contrôles aléatoires par vacation — Objectif : noter le brin tiré au sort et les tournées contrôlées</div>
+    <div class="form-group">
+      <label class="form-label">Date</label>
+      <input class="form-input" type="date" value="${S.date}" onchange="changerDate(this.value)" />
+    </div>
+  </div>`];
+  
+  for(let n=1; n<=3; n++){
+    const c = controles.find(x=>x.numero===n)||{};
+    const tournees = S.tournees ? S.tournees.filter(t=>t.controle_id===c.id) : [];
+    html.push(`<div class="card">
+      <div class="controle-num">🎲 Contrôle aléatoire N° ${n}</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="form-group">
+          <label class="form-label">Brin contrôlé</label>
+          <input class="form-input" type="text" placeholder="Ex: Brin 3" value="${c.brin||''}" onchange="sauvegarderControle(${n},'brin',this.value)" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Heure contrôle</label>
+          <input class="form-input" type="time" value="${c.heure_controle||''}" onchange="sauvegarderControle(${n},'heure_controle',this.value)" />
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Nom(s) sur le chantier</label>
+        <input class="form-input" type="text" placeholder="Noms des agents" value="${c.noms_chantier||''}" onchange="sauvegarderControle(${n},'noms_chantier',this.value)" />
+      </div>
+      <div class="form-label" style="margin-bottom:8px">Tournées contrôlées</div>
+      ${[1,2,3,4,5].map(i=>{
+        const t = tournees.find(x=>x.numero===i)||{};
+        return `<div style="background:var(--gris);border-radius:8px;padding:10px;margin-bottom:6px">
+          <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
+            <span style="font-weight:700;font-size:13px;min-width:16px">${i}.</span>
+            <input class="form-input" style="flex:1" type="text" placeholder="Contenant contrôlé" value="${t.contenant||''}" onchange="sauvegarderTournee(${n},${i},'contenant',this.value)" />
+            <button class="btn-ok ${t.resultat==='OK'?'':'opacity-50'}" onclick="sauvegarderTournee(${n},${i},'resultat','OK')" style="${t.resultat==='OK'?'':'opacity:0.4'}">OK</button>
+            <button class="btn-nok ${t.resultat==='NOK'?'':'opacity-50'}" onclick="sauvegarderTournee(${n},${i},'resultat','NOK')" style="${t.resultat==='NOK'?'':'opacity:0.4'}">NOK</button>
+          </div>
+          ${t.resultat==='NOK'?`
+          <input class="form-input" type="text" placeholder="Erreur(s) relevée(s)" value="${t.erreurs||''}" style="margin-bottom:4px" onchange="sauvegarderTournee(${n},${i},'erreurs',this.value)" />
+          <input class="form-input" type="text" placeholder="Solution(s) apportée(s)" value="${t.solutions||''}" onchange="sauvegarderTournee(${n},${i},'solutions',this.value)" />`:''}
+        </div>`;
+      }).join('')}
+    </div>`);
+  }
+  return html.join('');
+}
+
+// ── COLIS/H ────────────────────────────────────────────────────
+function renderColis(){
+  const equipe = S.agent.equipe || 'Soirée';
+  const tranches = equipe==='Matin' ? TRANCHES_MATIN : TRANCHES_SOIREE;
+  const moy = calcMoyenneColis();
+  const moyColor = moy ? (moy>=OBJECTIF_COLIS?'var(--vert)':'var(--rouge)') : 'var(--texte-doux)';
+  
+  return `<div class="card">
+    <div class="card-title">📦 Contrôle Colis/H — Objectif ${OBJECTIF_COLIS} colis/h</div>
+    <div style="display:flex;gap:10px;margin-bottom:14px">
+      <div class="stat-box info" style="background:${moy&&moy>=OBJECTIF_COLIS?'var(--vert-pale)':moy?'var(--rouge-pale)':'var(--bleu-clair)'};border-color:${moyColor}">
+        <div class="stat-val" style="color:${moyColor}">${moy||'—'}</div>
+        <div class="stat-label" style="color:${moyColor}">Moyenne colis/h</div>
+      </div>
+      <div class="stat-box ok">
+        <div class="stat-val" style="color:var(--vert)">${OBJECTIF_COLIS}</div>
+        <div class="stat-label" style="color:var(--vert)">Objectif</div>
+      </div>
+    </div>
+    <table class="table-suivi">
+      <thead><tr>
+        <th>Tranche</th><th>Camion + H début</th><th>H contrôle</th><th>Qté colis</th><th>Cadence</th>
+      </tr></thead>
+      <tbody>
+        ${tranches.map(tranche=>{
+          const c = S.colisData.find(x=>x.tranche===tranche)||{};
+          const ok = c.quantite_colis ? (c.cadence_ok!==false) : null;
+          return `<tr>
+            <td style="font-weight:600;font-size:11px">${tranche}</td>
+            <td><input style="width:100%;border:none;background:transparent;font-size:11px;text-align:center" type="text" placeholder="—" value="${c.camion_h_debut||''}" onchange="sauvegarderColis('${tranche}','camion_h_debut',this.value)" /></td>
+            <td style="font-size:11px;text-align:center;font-weight:600;color:var(--bleu)">${c.heure_controle||'—'}</td>
+            <td><input style="width:70px;border:none;background:transparent;font-size:12px;font-weight:700;text-align:center" type="number" placeholder="—" value="${c.quantite_colis||''}" onchange="sauvegarderColis('${tranche}','quantite_colis',parseInt(this.value)||null)" /></td>
+            <td>
+              ${c.quantite_colis?`
+              <select style="border:none;background:transparent;font-size:11px;font-weight:700;color:${ok?'var(--vert)':'var(--rouge)'}" onchange="sauvegarderColis('${tranche}','cadence_ok',this.value==='OK')">
+                <option ${c.cadence_ok!==false?'selected':''} value="OK" style="color:var(--vert)">✅ OK</option>
+                <option ${c.cadence_ok===false?'selected':''} value="NOK" style="color:var(--rouge)">❌ NOK</option>
+              </select>`:'—'}
+            </td>
+          </tr>
+          ${c.cadence_ok===false?`<tr style="background:var(--orange-pale)"><td colspan="5"><input style="width:100%;border:none;background:transparent;font-size:11px;padding:4px" type="text" placeholder="Raison si cadence non atteinte..." value="${c.raison_non_atteinte||''}" onchange="sauvegarderColis('${tranche}','raison_non_atteinte',this.value)" /></td></tr>`:''}`;
+        }).join('')}
+      </tbody>
+    </table>
+  </div>`;
+}
+
+// ── EPI ────────────────────────────────────────────────────────
+function renderEPI(){
+  const epis = S.epiData||[];
+  return `<div class="card">
+    <div class="card-title">🦺 Contrôle EPI — ${fmtDate(S.date)}</div>
+    <div class="info-banner">À compléter uniquement pour les collaborateurs sans EPI. Laisser vide si tout le monde est conforme.</div>
+    ${!epis.length?`<div class="empty-state"><div class="empty-icon">✅</div><div>Aucun manquement EPI pour cette date</div></div>`:''}
+    ${epis.map((e,i)=>`<div style="background:var(--orange-pale);border-radius:10px;padding:12px;margin-bottom:8px;border-left:4px solid var(--orange)">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <span style="font-weight:700;font-size:13px">Manquement ${i+1}</span>
+        <button onclick="supprimerEPI('${e.id}')" style="background:none;border:none;color:var(--rouge);cursor:pointer;font-size:18px">✕</button>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Nom + Prénom</label>
+        <input class="form-input" type="text" value="${e.nom_prenom||''}" onchange="modifierEPI('${e.id}','nom_prenom',this.value)" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">EPI manquant</label>
+        <select class="form-input" onchange="modifierEPI('${e.id}','epi_manquant',this.value)">
+          <option value="">-- Choisir --</option>
+          ${['Gants','Gilet haute visibilité','Chaussures de sécurité','Gants + Gilet','Gants + Chaussures','Gilet + Chaussures','Tout manquant'].map(v=>`<option value="${v}" ${e.epi_manquant===v?'selected':''}>${v}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Solution apportée</label>
+        <input class="form-input" type="text" placeholder="Ex: EPI fourni sur place, recadrage verbal..." value="${e.solution||''}" onchange="modifierEPI('${e.id}','solution',this.value)" />
+      </div>
+    </div>`).join('')}
+    <button class="btn-add" onclick="ajouterEPI()">+ Ajouter un manquement EPI</button>
+  </div>`;
+}
+
+// ── ADMIN ──────────────────────────────────────────────────────
+function renderAdmin(){
+  if(!S.agent.est_responsable) return `<div class="card"><div class="empty-state">Accès non autorisé.</div></div>`;
+  return `<div class="card">
+    <div class="card-title">⚙️ Admin — Vue globale</div>
+    <div class="form-group">
+      <label class="form-label">Sélectionner une date</label>
+      <input class="form-input" type="date" value="${S.date}" onchange="changerDate(this.value)" />
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:14px">
+      <button onclick="exporterPDF()" class="btn-primary" style="flex:1">🖨️ Exporter PDF</button>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-title">📋 Chantiers du jour</div>
+    ${renderAdminChantiers()}
+  </div>
+  <div class="card">
+    <div class="card-title">📦 Colis/H du jour</div>
+    ${renderAdminColis()}
+  </div>
+  <div class="card">
+    <div class="card-title">🦺 EPI du jour</div>
+    ${renderAdminEPI()}
+  </div>`;
+}
+
+function renderAdminChantiers(){
+  if(!S.controles.length) return `<div class="empty-state">Aucun contrôle saisi.</div>`;
+  return S.controles.map(c=>`<div style="background:var(--gris);border-radius:8px;padding:10px;margin-bottom:8px">
+    <div style="font-weight:700;margin-bottom:4px">Contrôle N°${c.numero} — Brin: ${c.brin||'—'} — ${c.heure_controle||'—'}</div>
+    <div style="font-size:12px;color:var(--texte-doux)">${c.noms_chantier||'—'}</div>
+  </div>`).join('');
+}
+
+function renderAdminColis(){
+  if(!S.colisData.length) return `<div class="empty-state">Aucune donnée colis saisie.</div>`;
+  const moy = calcMoyenneColis();
+  return `<div style="margin-bottom:8px;font-weight:700;color:${moy&&moy>=OBJECTIF_COLIS?'var(--vert)':'var(--rouge)'}">
+    Moyenne : ${moy||'—'} colis/h ${moy?(moy>=OBJECTIF_COLIS?'✅':'❌ Sous objectif'):''}
+  </div>
+  <table class="table-suivi">
+    <thead><tr><th>Tranche</th><th>Qté</th><th>Cadence</th></tr></thead>
+    <tbody>
+    ${S.colisData.filter(c=>c.quantite_colis).map(c=>`<tr>
+      <td>${c.tranche}</td>
+      <td>${c.quantite_colis}</td>
+      <td style="color:${c.cadence_ok!==false?'var(--vert)':'var(--rouge)'}">${c.cadence_ok!==false?'✅ OK':'❌ NOK'}</td>
+    </tr>`).join('')}
+    </tbody>
+  </table>`;
+}
+
+function renderAdminEPI(){
+  if(!S.epiData.length) return `<div style="color:var(--vert);font-weight:600">✅ Aucun manquement EPI</div>`;
+  return S.epiData.map(e=>`<div style="background:var(--orange-pale);border-radius:8px;padding:8px;margin-bottom:6px">
+    <div style="font-weight:700">${e.nom_prenom}</div>
+    <div style="font-size:12px">${e.epi_manquant} — ${e.solution||'—'}</div>
+  </div>`).join('');
+}
+
+// ── ACTIONS ────────────────────────────────────────────────────
+async function connexion(){
+  const prenom = document.getElementById('login-prenom')?.value.trim();
+  const code = document.getElementById('login-code')?.value.trim();
+  if(!prenom||!code) return;
+  try{
+    const res = await db.get('agents',`prenom=ilike.${encodeURIComponent(prenom)}&code_acces=eq.${encodeURIComponent(code)}&select=*`);
+    if(!res.length){ document.getElementById('login-error').style.display='block'; return; }
+    S.agent = res[0];
+    S.loading = true; render();
+    await chargerTout();
+    S.loading = false; render();
+  }catch(e){ toast('Erreur connexion','err'); }
+}
+
+function deconnexion(){
+  S = {agent:null, vue:'chantiers', loading:false, vacationId:null, date:getToday(), controles:[], colisData:[], epiData:[], tournees:[], toutesVacations:[], adminVue:'liste'};
+  render();
+}
+
+async function setVue(v){
+  S.vue = v; render();
+}
+
+async function changerDate(d){
+  S.date = d; S.loading = true; render();
+  await chargerTout();
+  S.loading = false; render();
+}
+
+// ── CHARGEMENT ─────────────────────────────────────────────────
+async function chargerTout(){
+  await getOrCreateVacation();
+  await Promise.all([chargerControles(), chargerColis(), chargerEPI()]);
+}
+
+async function getOrCreateVacation(){
+  const equipe = S.agent.equipe || 'Toutes';
+  let vacs = await db.get('vacations_suivi',`agent_id=eq.${S.agent.id}&date=eq.${S.date}&select=*`);
+  if(!vacs.length){
+    const created = await db.post('vacations_suivi',{agent_id:S.agent.id, equipe, date:S.date});
+    S.vacationId = created[0].id;
+  } else {
+    S.vacationId = vacs[0].id;
+  }
+}
+
+async function chargerControles(){
+  S.controles = await db.get('controles_chantiers',`vacation_id=eq.${S.vacationId}&order=numero.asc`);
+  const ids = S.controles.map(c=>c.id);
+  if(ids.length){
+    S.tournees = await db.get('tournees',`controle_id=in.(${ids.join(',')})&order=numero.asc`);
+  } else { S.tournees = []; }
+}
+
+async function chargerColis(){
+  S.colisData = await db.get('controles_colis',`vacation_id=eq.${S.vacationId}&order=created_at.asc`);
+}
+
+async function chargerEPI(){
+  S.epiData = await db.get('epi',`vacation_id=eq.${S.vacationId}&order=created_at.asc`);
+}
+
+// ── SAUVEGARDE CONTROLES ────────────────────────────────────────
+async function sauvegarderControle(num, champ, valeur){
+  try{
+    let c = S.controles.find(x=>x.numero===num);
+    if(!c){
+      const created = await db.post('controles_chantiers',{vacation_id:S.vacationId, numero:num, [champ]:valeur});
+      S.controles.push(created[0]);
+    } else {
+      await db.patch('controles_chantiers',`id=eq.${c.id}`,{[champ]:valeur});
+      c[champ] = valeur;
+    }
+  }catch(e){ toast('Erreur sauvegarde','err'); }
+}
+
+async function sauvegarderTournee(numControle, numTournee, champ, valeur){
+  try{
+    let c = S.controles.find(x=>x.numero===numControle);
+    if(!c){
+      const created = await db.post('controles_chantiers',{vacation_id:S.vacationId, numero:numControle});
+      c = created[0]; S.controles.push(c);
+    }
+    let t = S.tournees ? S.tournees.find(x=>x.controle_id===c.id&&x.numero===numTournee) : null;
+    if(!t){
+      const created = await db.post('tournees',{controle_id:c.id, numero:numTournee, [champ]:valeur});
+      if(!S.tournees) S.tournees = [];
+      S.tournees.push(created[0]);
+    } else {
+      await db.patch('tournees',`id=eq.${t.id}`,{[champ]:valeur});
+      t[champ] = valeur;
+    }
+    if(champ==='resultat') render();
+  }catch(e){ toast('Erreur sauvegarde','err'); }
+}
+
+// ── SAUVEGARDE COLIS ────────────────────────────────────────────
+async function sauvegarderColis(tranche, champ, valeur){
+  try{
+    let c = S.colisData.find(x=>x.tranche===tranche);
+    // Si on saisit la quantité et que l'heure n'est pas encore renseignée, on l'auto-remplit
+    const now = new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
+    const autoHeure = (champ==='quantite_colis' && (!c||!c.heure_controle)) ? now : null;
+    
+    if(!c){
+      const body = {vacation_id:S.vacationId, tranche, [champ]:valeur};
+      if(autoHeure) body.heure_controle = autoHeure;
+      const created = await db.post('controles_colis', body);
+      S.colisData.push(created[0]);
+    } else {
+      const body = {[champ]:valeur};
+      if(autoHeure) body.heure_controle = autoHeure;
+      await db.patch('controles_colis',`id=eq.${c.id}`, body);
+      c[champ] = valeur;
+      if(autoHeure) c.heure_controle = autoHeure;
+    }
+    if(champ==='cadence_ok'||champ==='quantite_colis') render();
+  }catch(e){ toast('Erreur sauvegarde','err'); }
+}
+
+// ── EPI ────────────────────────────────────────────────────────
+async function ajouterEPI(){
+  try{
+    const created = await db.post('epi',{vacation_id:S.vacationId, nom_prenom:'', epi_manquant:''});
+    S.epiData.push(created[0]);
+    render();
+  }catch(e){ toast('Erreur','err'); }
+}
+
+async function supprimerEPI(id){
+  try{
+    await db.del('epi',`id=eq.${id}`);
+    S.epiData = S.epiData.filter(e=>e.id!==id);
+    render();
+  }catch(e){ toast('Erreur','err'); }
+}
+
+async function modifierEPI(id, champ, valeur){
+  try{
+    await db.patch('epi',`id=eq.${id}`,{[champ]:valeur});
+    const e = S.epiData.find(x=>x.id===id);
+    if(e) e[champ]=valeur;
+  }catch(e){ toast('Erreur','err'); }
+}
+
+// ── EXPORT PDF ─────────────────────────────────────────────────
+function exporterPDF(){
+  const moy = calcMoyenneColis();
+  const win = window.open('','_blank');
+  win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8">
+  <title>Cahier Vacation MLH — ${S.date}</title>
+  <style>
+    body{font-family:Arial,sans-serif;padding:20px;max-width:800px;margin:0 auto;font-size:12px}
+    h1{color:#1a56a0;border-bottom:3px solid #1a56a0;padding-bottom:8px;font-size:18px}
+    h2{color:#1a56a0;font-size:14px;margin:16px 0 8px;border-left:4px solid #1a56a0;padding-left:8px}
+    table{width:100%;border-collapse:collapse;margin-bottom:14px}
+    th{background:#1a56a0;color:white;padding:6px;text-align:left}
+    td{padding:6px;border-bottom:1px solid #eee}
+    tr:nth-child(even){background:#f4f6f9}
+    .ok{color:#16a34a;font-weight:bold} .nok{color:#dc2626;font-weight:bold}
+    .controle-block{background:#f4f6f9;padding:10px;border-radius:6px;margin-bottom:10px}
+    .stat{display:inline-block;padding:6px 12px;border-radius:6px;font-weight:bold;margin-right:8px}
+    .stat-ok{background:#dcfce7;color:#16a34a} .stat-nok{background:#fee2e2;color:#dc2626}
+    @media print{button{display:none}}
+  </style></head><body>
+  <h1>📓 Cahier de Vacation — La Poste Mulhouse</h1>
+  <p><strong>Date :</strong> ${fmtDate(S.date)} | <strong>Équipe :</strong> ${S.agent.equipe||'—'} | <strong>Saisi par :</strong> ${S.agent.prenom} ${S.agent.nom}</p>
+  
+  <h2>📋 Vérification des Chantiers</h2>
+  ${S.controles.length?S.controles.map(c=>{
+    const tournees = (S.tournees||[]).filter(t=>t.controle_id===c.id);
+    return `<div class="controle-block">
+      <strong>Contrôle N°${c.numero}</strong> — Brin: ${c.brin||'—'} — Heure: ${c.heure_controle||'—'} — Agents: ${c.noms_chantier||'—'}
+      ${tournees.length?`<table style="margin-top:8px"><tr><th>N°</th><th>Contenant</th><th>Résultat</th><th>Erreurs</th><th>Solutions</th></tr>
+      ${tournees.map(t=>`<tr><td>${t.numero}</td><td>${t.contenant||'—'}</td><td class="${(t.resultat||'').toLowerCase()}">${t.resultat||'—'}</td><td>${t.erreurs||'—'}</td><td>${t.solutions||'—'}</td></tr>`).join('')}</table>`:''}
+    </div>`;
+  }).join(''):'<p>Aucun contrôle saisi.</p>'}
+  
+  <h2>📦 Contrôle Colis/H — Objectif ${OBJECTIF_COLIS} colis/h</h2>
+  <p class="stat ${moy&&moy>=OBJECTIF_COLIS?'stat-ok':'stat-nok'}">Moyenne : ${moy||'—'} colis/h ${moy?(moy>=OBJECTIF_COLIS?'✅ Objectif atteint':'❌ Sous objectif'):''}</p>
+  ${S.colisData.length?`<table>
+    <tr><th>Tranche</th><th>Camion + H début</th><th>H contrôle</th><th>Quantité</th><th>Cadence</th><th>Raison si NOK</th></tr>
+    ${S.colisData.filter(c=>c.quantite_colis).map(c=>`<tr>
+      <td>${c.tranche}</td><td>${c.camion_h_debut||'—'}</td><td>${c.heure_controle||'—'}</td>
+      <td><strong>${c.quantite_colis}</strong></td>
+      <td class="${c.cadence_ok!==false?'ok':'nok'}">${c.cadence_ok!==false?'✅ OK':'❌ NOK'}</td>
+      <td>${c.raison_non_atteinte||'—'}</td>
+    </tr>`).join('')}
+  </table>`:'<p>Aucune donnée colis saisie.</p>'}
+  
+  <h2>🦺 Contrôle EPI</h2>
+  ${S.epiData.length?`<table>
+    <tr><th>Nom + Prénom</th><th>EPI manquant</th><th>Solution apportée</th></tr>
+    ${S.epiData.map(e=>`<tr><td>${e.nom_prenom}</td><td class="nok">${e.epi_manquant}</td><td>${e.solution||'—'}</td></tr>`).join('')}
+  </table>`:'<p class="ok">✅ Aucun manquement EPI ce jour.</p>'}
+  
+  <br><button onclick="window.print()" style="padding:10px 20px;background:#1a56a0;color:white;border:none;border-radius:6px;font-size:14px;cursor:pointer">🖨️ Imprimer / Sauvegarder PDF</button>
+  </body></html>`);
+  win.document.close();
+  setTimeout(()=>win.print(), 500);
+}
+
+render();
+</script>
+</body>
+</html>
