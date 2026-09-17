@@ -127,6 +127,7 @@ let S = {
   agent: null, vue: 'epi', loading: false,
   vacationId: null, date: new Date().toISOString().split('T')[0],
   controles: [], colisData: [], epiData: [], epiValide: false,
+  epiEquipeSelectionnee: '',
   toutesVacations: [], adminVue: 'liste',
 };
 
@@ -329,7 +330,7 @@ function renderColis(){
 
 // ── EPI ────────────────────────────────────────────────────────
 function renderEPI(){
-  const equipe = S.agent.equipe||'';
+  const equipe = S.agent.equipe || S.epiEquipeSelectionnee || '';
   const personnel = PERSONNEL[equipe]||[];
   const epis = S.epiData||[];
   const manquements = epis.filter(e=>e.nom_prenom!=='RAS');
@@ -351,6 +352,15 @@ function renderEPI(){
   return `<div class="card">
     <div class="card-title">🦺 Contrôle EPI — ${fmtDate(S.date)}</div>
     ${S.epiValide?`<div style="background:var(--orange-pale);border-radius:10px;padding:10px 14px;font-size:13px;color:var(--orange);margin-bottom:12px;font-weight:600">⚠️ EPI déjà validés par le chef d'équipe — Modification admin</div>`:`<div class="info-banner">Coche les agents avec EPI manquant. Laisse tout décoché si tout le monde est conforme (RAS).</div>`}
+    ${S.agent.est_responsable && !S.agent.equipe?`
+    <div class="form-group">
+      <label class="form-label">Équipe à contrôler</label>
+      <div style="display:flex;gap:8px;margin-bottom:12px">
+        <button onclick="S.epiEquipeSelectionnee='Matin';render()" style="flex:1;padding:12px;border-radius:10px;border:2px solid ${equipe==='Matin'?'var(--bleu)':'var(--gris-bord)'};background:${equipe==='Matin'?'var(--bleu-clair)':'white'};color:${equipe==='Matin'?'var(--bleu)':'var(--texte)'};font-weight:700;cursor:pointer">☀️ Matin</button>
+        <button onclick="S.epiEquipeSelectionnee='Soirée';render()" style="flex:1;padding:12px;border-radius:10px;border:2px solid ${equipe==='Soirée'?'var(--bleu)':'var(--gris-bord)'};background:${equipe==='Soirée'?'var(--bleu-clair)':'white'};color:${equipe==='Soirée'?'var(--bleu)':'var(--texte)'};font-weight:700;cursor:pointer">🌆 Soirée</button>
+      </div>
+    </div>`:''}
+    ${!equipe?`<div class="empty-state"><div class="empty-icon">👆</div><div>Sélectionne une équipe ci-dessus</div></div>`:''}
     ${personnel.map(nom=>{
       const epi = manquements.find(e=>e.nom_prenom===nom);
       return `<div style="padding:10px 0;border-bottom:1px solid var(--gris)">
