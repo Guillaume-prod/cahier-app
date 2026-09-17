@@ -1,5 +1,4 @@
 
-
 <!DOCTYPE html>
 <html lang="fr">
 <head>
@@ -99,8 +98,8 @@ select.form-input{cursor:pointer;}
 <div id="app"></div>
 
 <script>
-const SUPABASE_URL = 'https://rohecdjlnxiaeitdlwnq.supabase.co';
-const SUPABASE_KEY = 'sb_publishable_EmFdmGfuy4cw4MaAPWTVWw_LRdB_tZz';
+const SUPABASE_URL = 'https://cogducsipchjuxsafuqv.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_qDyP53AXFSqqLghWV70FNw_wSreDYSz';
 
 const TRANCHES_MATIN = ['00h00 - 01h00','01h00 - 02h00','02h00 - 03h00','03h00 - 04h00','04h00 - 05h00','05h00 - 06h00','06h00 - 07h00','07h00 - 08h00'];
 const TRANCHES_SOIREE = ['15h00 - 16h00','17h00 - 18h00','18h00 - 19h00','19h00 - 20h00','20h00 - 21h00','21h00 - 22h00','22h00 - 23h00','23h00 - 00h00','00h00 - 01h00'];
@@ -109,7 +108,7 @@ const OBJECTIF_COLIS = 2400;
 let S = {
   agent: null, vue: 'epi', loading: false,
   vacationId: null, date: new Date().toISOString().split('T')[0],
-  controles: [], colisData: [], epiData: [],
+  controles: [], colisData: [], epiData: [], epiValide: false,
   toutesVacations: [], adminVue: 'liste',
 };
 
@@ -163,13 +162,16 @@ function render(){
   if(S.loading){ app.innerHTML = `<div style="text-align:center;padding:60px;color:var(--texte-doux)">⏳ Chargement...</div>`; return; }
   
   const nav = S.agent.est_responsable
-    ? [['epi','🦺','EPI'],['chantiers','📋','Chantiers'],['colis','📦','Colis/h'],['admin','⚙️','Admin']]
-    : [['epi','🦺','EPI'],['chantiers','📋','Chantiers'],['colis','📦','Colis/h']];
+    ? [['epi','🦺','EPI'],['chantiers','📋','Chantiers'],['colis','📦','Colis/h'],['pdf','📄','PDF'],['admin','⚙️','Admin']]
+    : [['epi','🦺','EPI'],['chantiers','📋','Chantiers'],['colis','📦','Colis/h'],['pdf','📄','PDF']];
   
   let content = '';
   if(S.vue==='epi') content = renderEPI();
+  else if(S.vue==='code') content = renderChangerCode();
+  else if(!S.epiValide) content = renderEPIBlocage();
   else if(S.vue==='chantiers') content = renderChantiers();
   else if(S.vue==='colis') content = renderColis();
+  else if(S.vue==='pdf') content = renderPDF();
   else if(S.vue==='admin') content = renderAdmin();
   
   app.innerHTML = `
@@ -180,7 +182,10 @@ function render(){
       </div>
       <div style="text-align:right">
         <div style="font-size:12px;color:var(--texte-doux)">${fmtDate(S.date).split(' ').slice(0,2).join(' ')}</div>
+        <div style="display:flex;gap:8px">
+        ${!S.agent.est_responsable?`<button onclick="setVue('code')" style="font-size:11px;color:var(--bleu);background:none;border:none;cursor:pointer;padding:0">🔑 Code</button>`:''}
         <button onclick="deconnexion()" style="font-size:11px;color:var(--rouge);background:none;border:none;cursor:pointer;padding:0">Déconnexion</button>
+      </div>
       </div>
     </div>
     ${content}
@@ -308,8 +313,7 @@ function renderEPI(){
   const epis = S.epiData||[];
   return `<div class="card">
     <div class="card-title">🦺 Contrôle EPI — ${fmtDate(S.date)}</div>
-    <div class="info-banner">✅ À compléter en début de vacation. Ne renseigner que les agents sans EPI.</div>
-    <button onclick="exporterPDF()" class="btn-primary" style="margin-bottom:12px;background:#16a34a">🖨️ Exporter le cahier en PDF</button>
+    <div class="info-banner">✅ À compléter en début de vacation. Ne renseigner que les agents sans EPI. Valider avant de continuer.</div>
     ${!epis.length?`<div class="empty-state"><div class="empty-icon">✅</div><div>Aucun manquement EPI pour cette date</div></div>`:''}
     ${epis.map((e,i)=>`<div style="background:var(--orange-pale);border-radius:10px;padding:12px;margin-bottom:8px;border-left:4px solid var(--orange)">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
@@ -332,7 +336,10 @@ function renderEPI(){
         <input class="form-input" type="text" placeholder="Ex: EPI fourni sur place, recadrage verbal..." value="${e.solution||''}" onchange="modifierEPI('${e.id}','solution',this.value)" />
       </div>
     </div>`).join('')}
-    <button class="btn-add" onclick="ajouterEPI()">+ Ajouter un manquement EPI</button>
+    ${!S.epiValide?`
+    <button class="btn-add" onclick="ajouterEPI()" style="margin-bottom:10px">+ Ajouter un manquement EPI</button>
+    <button class="btn-primary" onclick="validerEPI()" style="background:var(--vert)">✅ Valider les EPI et continuer</button>
+    `:`<div style="background:var(--vert-pale);border-radius:10px;padding:12px;text-align:center;color:var(--vert);font-weight:700">✅ EPI validés — Saisie verrouillée</div>`}
   </div>`;
 }
 
@@ -345,10 +352,20 @@ function renderAdmin(){
       <label class="form-label">Sélectionner une date</label>
       <input class="form-input" type="date" value="${S.date}" onchange="changerDate(this.value)" />
     </div>
-    <div style="display:flex;gap:8px;margin-bottom:14px">
-      <button onclick="exporterPDF()" class="btn-primary" style="flex:1">🖨️ Exporter PDF</button>
-    </div>
   </div>
+  <div class="card">
+    <div class="card-title">👥 Gestion des agents</div>
+    ${(S.tousAgents||[]).map(a=>`
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--gris)">
+        <div>
+          <div style="font-weight:700;font-size:13px">${a.prenom} ${a.nom} ${a.equipe?'<span style="font-size:11px;color:var(--texte-doux)">· '+a.equipe+'</span>':''}</div>
+          <div style="font-size:11px;color:var(--texte-doux)">Code : ${a.code_acces}</div>
+        </div>
+        <button onclick="ouvrirEditAgent('${a.id}')" style="padding:6px 12px;background:var(--bleu-clair);color:var(--bleu);border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">✏️ Modifier</button>
+      </div>`).join('')}
+    <button class="btn-add" onclick="ouvrirAjoutAgent()" style="margin-top:10px">+ Ajouter un agent</button>
+  </div>
+  ${S.modalAgent?renderModalAgent():''}
   <div class="card">
     <div class="card-title">📋 Chantiers du jour</div>
     ${renderAdminChantiers()}
@@ -389,6 +406,56 @@ function renderAdminColis(){
   </table>`;
 }
 
+function ouvrirEditAgent(id){
+  const a = (S.tousAgents||[]).find(x=>x.id===id);
+  S.modalAgent = {...a, mode:'edit'};
+  render();
+}
+function ouvrirAjoutAgent(){
+  S.modalAgent = {mode:'add', nom:'', prenom:'', code_acces:'', equipe:''};
+  render();
+}
+function renderModalAgent(){
+  const a = S.modalAgent;
+  return `<div style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:200;display:flex;align-items:flex-end">
+    <div style="background:white;border-radius:20px 20px 0 0;padding:24px;width:100%;max-height:80vh;overflow-y:auto">
+      <div style="font-size:16px;font-weight:700;margin-bottom:16px">${a.mode==='add'?'Ajouter un agent':'Modifier l'agent'}</div>
+      <div class="form-group"><label class="form-label">Prénom</label><input class="form-input" id="m-prenom" type="text" value="${a.prenom||''}" /></div>
+      <div class="form-group"><label class="form-label">Nom</label><input class="form-input" id="m-nom" type="text" value="${a.nom||''}" /></div>
+      <div class="form-group"><label class="form-label">Code d'accès</label><input class="form-input" id="m-code" type="text" value="${a.code_acces||''}" /></div>
+      <div class="form-group"><label class="form-label">Équipe</label>
+        <select class="form-input" id="m-equipe">
+          <option value="">-- Aucune (admin) --</option>
+          <option value="Matin" ${a.equipe==='Matin'?'selected':''}>Matin</option>
+          <option value="Soirée" ${a.equipe==='Soirée'?'selected':''}>Soirée</option>
+        </select>
+      </div>
+      <div style="display:flex;gap:10px;margin-top:16px">
+        <button class="btn-secondary" onclick="S.modalAgent=null;render()">Annuler</button>
+        <button class="btn-primary" style="flex:1" onclick="sauvegarderAgent()">✅ Enregistrer</button>
+      </div>
+    </div>
+  </div>`;
+}
+async function sauvegarderAgent(){
+  const prenom = document.getElementById('m-prenom')?.value.trim();
+  const nom = document.getElementById('m-nom')?.value.trim();
+  const code = document.getElementById('m-code')?.value.trim();
+  const equipe = document.getElementById('m-equipe')?.value||null;
+  if(!prenom||!nom||!code) return toast('Remplis tous les champs','err');
+  try{
+    if(S.modalAgent.mode==='add'){
+      await db.post('agents',{prenom,nom,code_acces:code,equipe:equipe||null,est_responsable:false});
+    } else {
+      await db.patch('agents',`id=eq.${S.modalAgent.id}`,{prenom,nom,code_acces:code,equipe:equipe||null});
+    }
+    toast('✅ Agent enregistré !','ok');
+    S.modalAgent = null;
+    S.tousAgents = await db.get('agents','order=nom.asc');
+    render();
+  }catch(e){ toast('Erreur','err'); }
+}
+
 function renderAdminEPI(){
   if(!S.epiData.length) return `<div style="color:var(--vert);font-weight:600">✅ Aucun manquement EPI</div>`;
   return S.epiData.map(e=>`<div style="background:var(--orange-pale);border-radius:8px;padding:8px;margin-bottom:6px">
@@ -412,12 +479,34 @@ async function connexion(){
   }catch(e){ toast('Erreur connexion','err'); }
 }
 
+function renderChangerCode(){
+  return `<div class="card">
+    <div class="card-title">🔑 Changer mon code d'accès</div>
+    <div class="form-group"><label class="form-label">Nouveau code</label><input class="form-input" id="new-code" type="password" placeholder="Nouveau code" /></div>
+    <div class="form-group"><label class="form-label">Confirmer le code</label><input class="form-input" id="confirm-code" type="password" placeholder="Confirmer" /></div>
+    <button class="btn-primary" onclick="changerCode()">✅ Enregistrer</button>
+  </div>`;
+}
+async function changerCode(){
+  const n = document.getElementById('new-code')?.value.trim();
+  const c = document.getElementById('confirm-code')?.value.trim();
+  if(!n||!c) return toast('Remplis les deux champs','err');
+  if(n!==c) return toast('Les codes ne correspondent pas','err');
+  if(n.length<3) return toast('Code trop court (min 3 caractères)','err');
+  try{
+    await db.patch('agents',`id=eq.${S.agent.id}`,{code_acces:n});
+    S.agent.code_acces = n;
+    toast('✅ Code modifié !','ok');
+  }catch(e){ toast('Erreur','err'); }
+}
+
 function deconnexion(){
   S = {agent:null, vue:'chantiers', loading:false, vacationId:null, date:getToday(), controles:[], colisData:[], epiData:[], tournees:[], toutesVacations:[], adminVue:'liste'};
   render();
 }
 
 async function setVue(v){
+  if(!S.epiValide && v!=='epi' && v!=='code'){ toast("Valide d'abord les EPI avant de continuer",'err'); return; }
   S.vue = v; render();
 }
 
@@ -431,6 +520,7 @@ async function changerDate(d){
 async function chargerTout(){
   await getOrCreateVacation();
   await Promise.all([chargerControles(), chargerColis(), chargerEPI()]);
+  if(S.agent.est_responsable) S.tousAgents = await db.get('agents','order=nom.asc');
 }
 
 async function getOrCreateVacation(){
@@ -458,6 +548,8 @@ async function chargerColis(){
 
 async function chargerEPI(){
   S.epiData = await db.get('epi',`vacation_id=eq.${S.vacationId}&order=created_at.asc`);
+  const vac = await db.get('vacations_suivi',`id=eq.${S.vacationId}&select=epi_valide`);
+  S.epiValide = vac[0]?.epi_valide || false;
 }
 
 // ── SAUVEGARDE CONTROLES ────────────────────────────────────────
@@ -523,6 +615,48 @@ async function sauvegarderColis(tranche, champ, valeur){
 }
 
 // ── EPI ────────────────────────────────────────────────────────
+async function validerEPI(){
+  try{
+    // Si aucun manquement, créer une entrée RAS
+    if(!S.epiData.length){
+      await db.post('epi',{vacation_id:S.vacationId, nom_prenom:'RAS', epi_manquant:'RAS', solution:'Tous les agents conformes'});
+    }
+    await db.patch('vacations_suivi',`id=eq.${S.vacationId}`,{epi_valide:true});
+    S.epiValide = true;
+    toast('✅ EPI validés !','ok');
+    S.vue = 'chantiers';
+    render();
+  }catch(e){ toast('Erreur validation','err'); }
+}
+
+function renderEPIBlocage(){
+  return `<div class="card">
+    <div class="empty-state">
+      <div class="empty-icon">🦺</div>
+      <div style="font-weight:700;margin-bottom:8px">EPI non encore validés</div>
+      <div style="font-size:13px;color:var(--texte-doux);margin-bottom:16px">Tu dois valider les EPI avant d'accéder aux autres sections.</div>
+      <button class="btn-primary" onclick="setVue('epi')" style="max-width:200px;margin:0 auto">Aller aux EPI</button>
+    </div>
+  </div>`;
+}
+
+function renderPDF(){
+  const moy = calcMoyenneColis();
+  return `<div class="card">
+    <div class="card-title">📄 Export du cahier</div>
+    <div class="info-banner">Génère un PDF complet du cahier de vacation pour la date sélectionnée.</div>
+    <div style="background:var(--gris);border-radius:10px;padding:14px;margin-bottom:14px">
+      <div style="font-size:13px;font-weight:600;margin-bottom:8px">📅 ${fmtDate(S.date)}</div>
+      <div style="font-size:12px;color:var(--texte-doux)">Équipe : ${S.agent.equipe||'Toutes'}</div>
+      <div style="font-size:12px;color:var(--texte-doux)">Contrôles chantiers : ${S.controles.length}/3</div>
+      <div style="font-size:12px;color:var(--texte-doux)">Relevés colis : ${S.colisData.filter(c=>c.quantite_colis).length}</div>
+      <div style="font-size:12px;color:${moy&&moy>=OBJECTIF_COLIS?'var(--vert)':'var(--rouge)'}">Moyenne : ${moy||'—'} colis/h</div>
+      <div style="font-size:12px;color:var(--texte-doux)">EPI : ${S.epiData.filter(e=>e.nom_prenom!=='RAS').length===0?'✅ RAS':'⚠️ '+S.epiData.filter(e=>e.nom_prenom!=='RAS').length+' manquement(s)'}</div>
+    </div>
+    <button class="btn-primary" onclick="exporterPDF()">🖨️ Générer le PDF</button>
+  </div>`;
+}
+
 async function ajouterEPI(){
   try{
     const created = await db.post('epi',{vacation_id:S.vacationId, nom_prenom:'', epi_manquant:''});
