@@ -106,7 +106,7 @@ const TRANCHES_SOIREE = ['15h00 - 16h00','17h00 - 18h00','18h00 - 19h00','19h00 
 const OBJECTIF_COLIS = 2400;
 
 let S = {
-  agent: null, vue: 'chantiers', loading: false,
+  agent: null, vue: 'epi', loading: false,
   vacationId: null, date: new Date().toISOString().split('T')[0],
   controles: [], colisData: [], epiData: [],
   toutesVacations: [], adminVue: 'liste',
@@ -162,13 +162,13 @@ function render(){
   if(S.loading){ app.innerHTML = `<div style="text-align:center;padding:60px;color:var(--texte-doux)">⏳ Chargement...</div>`; return; }
   
   const nav = S.agent.est_responsable
-    ? [['chantiers','📋','Chantiers'],['colis','📦','Colis/h'],['epi','🦺','EPI'],['admin','⚙️','Admin']]
-    : [['chantiers','📋','Chantiers'],['colis','📦','Colis/h'],['epi','🦺','EPI']];
+    ? [['epi','🦺','EPI'],['chantiers','📋','Chantiers'],['colis','📦','Colis/h'],['admin','⚙️','Admin']]
+    : [['epi','🦺','EPI'],['chantiers','📋','Chantiers'],['colis','📦','Colis/h']];
   
   let content = '';
-  if(S.vue==='chantiers') content = renderChantiers();
+  if(S.vue==='epi') content = renderEPI();
+  else if(S.vue==='chantiers') content = renderChantiers();
   else if(S.vue==='colis') content = renderColis();
-  else if(S.vue==='epi') content = renderEPI();
   else if(S.vue==='admin') content = renderAdmin();
   
   app.innerHTML = `
@@ -291,15 +291,11 @@ function renderColis(){
             <td><input style="width:100%;border:none;background:transparent;font-size:11px;text-align:center" type="text" placeholder="—" value="${c.camion_h_debut||''}" onchange="sauvegarderColis('${tranche}','camion_h_debut',this.value)" /></td>
             <td style="font-size:11px;text-align:center;font-weight:600;color:var(--bleu)">${c.heure_controle||'—'}</td>
             <td><input style="width:70px;border:none;background:transparent;font-size:12px;font-weight:700;text-align:center" type="number" placeholder="—" value="${c.quantite_colis||''}" onchange="sauvegarderColis('${tranche}','quantite_colis',parseInt(this.value)||null)" /></td>
-            <td>
-              ${c.quantite_colis?`
-              <select style="border:none;background:transparent;font-size:11px;font-weight:700;color:${ok?'var(--vert)':'var(--rouge)'}" onchange="sauvegarderColis('${tranche}','cadence_ok',this.value==='OK')">
-                <option ${c.cadence_ok!==false?'selected':''} value="OK" style="color:var(--vert)">✅ OK</option>
-                <option ${c.cadence_ok===false?'selected':''} value="NOK" style="color:var(--rouge)">❌ NOK</option>
-              </select>`:'—'}
+            <td style="font-weight:700;color:${c.quantite_colis?(c.quantite_colis>=OBJECTIF_COLIS?'var(--vert)':'var(--rouge)'):'var(--texte-doux)'}">
+              ${c.quantite_colis?(c.quantite_colis>=OBJECTIF_COLIS?'✅ OK':'❌ NOK'):'—'}
             </td>
           </tr>
-          ${c.cadence_ok===false?`<tr style="background:var(--orange-pale)"><td colspan="5"><input style="width:100%;border:none;background:transparent;font-size:11px;padding:4px" type="text" placeholder="Raison si cadence non atteinte..." value="${c.raison_non_atteinte||''}" onchange="sauvegarderColis('${tranche}','raison_non_atteinte',this.value)" /></td></tr>`:''}`;
+          ${(c.quantite_colis&&c.quantite_colis<OBJECTIF_COLIS)?`<tr style="background:var(--orange-pale)"><td colspan="5"><input style="width:100%;border:none;background:transparent;font-size:11px;padding:4px" type="text" placeholder="Raison si cadence non atteinte..." value="${c.raison_non_atteinte||''}" onchange="sauvegarderColis('${tranche}','raison_non_atteinte',this.value)" /></td></tr>`:''}`;
         }).join('')}
       </tbody>
     </table>
@@ -311,7 +307,8 @@ function renderEPI(){
   const epis = S.epiData||[];
   return `<div class="card">
     <div class="card-title">🦺 Contrôle EPI — ${fmtDate(S.date)}</div>
-    <div class="info-banner">À compléter uniquement pour les collaborateurs sans EPI. Laisser vide si tout le monde est conforme.</div>
+    <div class="info-banner">✅ À compléter en début de vacation. Ne renseigner que les agents sans EPI.</div>
+    <button onclick="exporterPDF()" class="btn-primary" style="margin-bottom:12px;background:#16a34a">🖨️ Exporter le cahier en PDF</button>
     ${!epis.length?`<div class="empty-state"><div class="empty-icon">✅</div><div>Aucun manquement EPI pour cette date</div></div>`:''}
     ${epis.map((e,i)=>`<div style="background:var(--orange-pale);border-radius:10px;padding:12px;margin-bottom:8px;border-left:4px solid var(--orange)">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
@@ -503,18 +500,22 @@ async function sauvegarderColis(tranche, champ, valeur){
     // Si on saisit la quantité et que l'heure n'est pas encore renseignée, on l'auto-remplit
     const now = new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
     const autoHeure = (champ==='quantite_colis' && (!c||!c.heure_controle)) ? now : null;
+    const autoCadence = (champ==='quantite_colis' && valeur) ? (valeur>=OBJECTIF_COLIS) : null;
     
     if(!c){
       const body = {vacation_id:S.vacationId, tranche, [champ]:valeur};
       if(autoHeure) body.heure_controle = autoHeure;
+      if(autoCadence!==null) body.cadence_ok = autoCadence;
       const created = await db.post('controles_colis', body);
       S.colisData.push(created[0]);
     } else {
       const body = {[champ]:valeur};
       if(autoHeure) body.heure_controle = autoHeure;
+      if(autoCadence!==null) body.cadence_ok = autoCadence;
       await db.patch('controles_colis',`id=eq.${c.id}`, body);
       c[champ] = valeur;
       if(autoHeure) c.heure_controle = autoHeure;
+      if(autoCadence!==null) c.cadence_ok = autoCadence;
     }
     if(champ==='cadence_ok'||champ==='quantite_colis') render();
   }catch(e){ toast('Erreur sauvegarde','err'); }
