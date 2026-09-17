@@ -184,6 +184,7 @@ function render(){
         <div style="font-size:12px;color:var(--texte-doux)">${fmtDate(S.date).split(' ').slice(0,2).join(' ')}</div>
         <div style="display:flex;gap:8px">
         ${!S.agent.est_responsable?`<button onclick="setVue('code')" style="font-size:11px;color:var(--bleu);background:none;border:none;cursor:pointer;padding:0">🔑 Code</button>`:''}
+        <button onclick="finVacation()" style="font-size:11px;color:var(--orange);background:none;border:none;cursor:pointer;padding:0">🏁 Fin</button>
         <button onclick="deconnexion()" style="font-size:11px;color:var(--rouge);background:none;border:none;cursor:pointer;padding:0">Déconnexion</button>
       </div>
       </div>
@@ -315,25 +316,25 @@ function renderEPI(){
     <div class="card-title">🦺 Contrôle EPI — ${fmtDate(S.date)}</div>
     <div class="info-banner">✅ À compléter en début de vacation. Ne renseigner que les agents sans EPI. Valider avant de continuer.</div>
     ${!epis.length?`<div class="empty-state"><div class="empty-icon">✅</div><div>Aucun manquement EPI pour cette date</div></div>`:''}
-    ${epis.map((e,i)=>`<div style="background:var(--orange-pale);border-radius:10px;padding:12px;margin-bottom:8px;border-left:4px solid var(--orange)">
+    ${epis.filter(e=>e.nom_prenom!=='RAS').map((e,i)=>`<div style="background:${S.epiValide?'var(--gris)':'var(--orange-pale)'};border-radius:10px;padding:12px;margin-bottom:8px;border-left:4px solid ${S.epiValide?'var(--vert)':'var(--orange)'}">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
         <span style="font-weight:700;font-size:13px">Manquement ${i+1}</span>
-        <button onclick="supprimerEPI('${e.id}')" style="background:none;border:none;color:var(--rouge);cursor:pointer;font-size:18px">✕</button>
+        ${!S.epiValide?`<button onclick="supprimerEPI('${e.id}')" style="background:none;border:none;color:var(--rouge);cursor:pointer;font-size:18px">✕</button>`:'🔒'}
       </div>
       <div class="form-group">
         <label class="form-label">Nom + Prénom</label>
-        <input class="form-input" type="text" value="${e.nom_prenom||''}" onchange="modifierEPI('${e.id}','nom_prenom',this.value)" />
+        ${S.epiValide?`<div style="padding:10px;background:white;border-radius:8px;font-size:13px">${e.nom_prenom||'—'}</div>`:`<input class="form-input" type="text" value="${e.nom_prenom||''}" onchange="modifierEPI('${e.id}','nom_prenom',this.value)" />`}
       </div>
       <div class="form-group">
         <label class="form-label">EPI manquant</label>
-        <select class="form-input" onchange="modifierEPI('${e.id}','epi_manquant',this.value)">
+        ${S.epiValide?`<div style="padding:10px;background:white;border-radius:8px;font-size:13px;color:var(--rouge);font-weight:700">${e.epi_manquant||'—'}</div>`:`<select class="form-input" onchange="modifierEPI('${e.id}','epi_manquant',this.value)">
           <option value="">-- Choisir --</option>
           ${['Gants','Gilet haute visibilité','Chaussures de sécurité','Gants + Gilet','Gants + Chaussures','Gilet + Chaussures','Tout manquant'].map(v=>`<option value="${v}" ${e.epi_manquant===v?'selected':''}>${v}</option>`).join('')}
-        </select>
+        </select>`}
       </div>
       <div class="form-group">
         <label class="form-label">Solution apportée</label>
-        <input class="form-input" type="text" placeholder="Ex: EPI fourni sur place, recadrage verbal..." value="${e.solution||''}" onchange="modifierEPI('${e.id}','solution',this.value)" />
+        ${S.epiValide?`<div style="padding:10px;background:white;border-radius:8px;font-size:13px">${e.solution||'—'}</div>`:`<input class="form-input" type="text" placeholder="Ex: EPI fourni sur place, recadrage verbal..." value="${e.solution||''}" onchange="modifierEPI('${e.id}','solution',this.value)" />`}
       </div>
     </div>`).join('')}
     ${!S.epiValide?`
@@ -501,7 +502,20 @@ async function changerCode(){
 }
 
 function deconnexion(){
-  S = {agent:null, vue:'chantiers', loading:false, vacationId:null, date:getToday(), controles:[], colisData:[], epiData:[], tournees:[], toutesVacations:[], adminVue:'liste'};
+  S = {agent:null, vue:'epi', loading:false, vacationId:null, date:getToday(), controles:[], colisData:[], epiData:[], epiValide:false, tournees:[], toutesVacations:[], adminVue:'liste', modalAgent:null, tousAgents:[]};
+  render();
+}
+
+async function finVacation(){
+  if(!confirm('Terminer cette vacation ?')) return;
+  S.vacationId = null;
+  S.epiValide = false;
+  S.controles = [];
+  S.colisData = [];
+  S.epiData = [];
+  S.tournees = [];
+  S.vue = 'epi';
+  toast('✅ Vacation terminée !','ok');
   render();
 }
 
