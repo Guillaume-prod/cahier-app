@@ -128,6 +128,7 @@ let S = {
   vacationId: null, date: new Date().toISOString().split('T')[0],
   controles: [], colisData: [], epiData: [], epiValide: false,
   epiEquipeSelectionnee: '',
+  modeTest: false,
   toutesVacations: [], adminVue: 'liste',
 };
 
@@ -343,7 +344,7 @@ function renderColis(){
             return `<tr>
               <td style="font-weight:600;font-size:11px">${tranche}</td>
               <td><input style="width:100%;border:none;background:transparent;font-size:11px;text-align:center" type="text" placeholder="—" value="${c.camion_h_debut||''}" onchange="sauvegarderColis('${tranche}','camion_h_debut',this.value)" /></td>
-              <td style="font-size:11px;text-align:center;font-weight:600;color:var(--bleu)">${c.heure_controle||'—'}</td>
+              <td style="text-align:center">${S.modeTest?`<input style="width:75px;border:1.5px solid var(--orange);border-radius:6px;font-size:11px;text-align:center;padding:4px" type="time" value="${c.heure_controle||''}" onchange="sauvegarderColis('${tranche}','heure_controle',this.value)" />`:`<span style="font-size:11px;font-weight:600;color:var(--bleu)">${c.heure_controle||'—'}</span>`}</td>
               <td><input style="width:90px;border:1.5px solid var(--gris-bord);border-radius:8px;background:white;font-size:15px;font-weight:700;text-align:center;padding:6px 4px" type="number" placeholder="—" value="${c.quantite_colis||''}" onchange="sauvegarderColis('${tranche}','quantite_colis',parseInt(this.value)||null)" /></td>
               <td style="font-weight:700;color:${moyColor};font-size:13px;text-align:center">${moyTranche||'—'}</td>
               <td><input style="width:70px;border:1.5px solid var(--gris-bord);border-radius:8px;background:white;font-size:13px;text-align:center;padding:5px 4px" type="number" placeholder="0" value="${c.arret_machine_cumul||''}" onchange="sauvegarderColis('${tranche}','arret_machine_cumul',parseInt(this.value)||0)" /></td>
@@ -436,6 +437,13 @@ function renderAdmin(){
     <div class="form-group">
       <label class="form-label">Sélectionner une date</label>
       <input class="form-input" type="date" value="${S.date}" onchange="changerDate(this.value)" />
+    </div>
+    <div onclick="S.modeTest=!S.modeTest;render()" style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-radius:10px;border:2px solid ${S.modeTest?'var(--orange)':'var(--gris-bord)'};background:${S.modeTest?'var(--orange-pale)':'white'};cursor:pointer;margin-top:4px">
+      <div>
+        <div style="font-weight:700;font-size:14px;color:${S.modeTest?'var(--orange)':'var(--texte)'}">🧪 Mode test</div>
+        <div style="font-size:12px;color:var(--texte-doux)">${S.modeTest?'Actif — saisie manuelle des heures':'Inactif — heures automatiques'}</div>
+      </div>
+      <span style="font-size:22px">${S.modeTest?'🟠':'⚪'}</span>
     </div>
   </div>
   <div class="card">
@@ -690,7 +698,7 @@ async function sauvegarderColis(tranche, champ, valeur){
     let c = S.colisData.find(x=>x.tranche===tranche);
     // Si on saisit la quantité et que l'heure n'est pas encore renseignée, on l'auto-remplit
     const now = new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
-    const autoHeure = (champ==='quantite_colis' && (!c||!c.heure_controle)) ? now : null;
+    const autoHeure = (!S.modeTest && champ==='quantite_colis' && (!c||!c.heure_controle)) ? now : null;
     const autoCadence = (champ==='quantite_colis' && valeur) ? (valeur>=OBJECTIF_COLIS) : null;
     
     if(!c){
