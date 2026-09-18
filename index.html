@@ -128,7 +128,7 @@ let S = {
   vacationId: null, date: new Date().toISOString().split('T')[0],
   controles: [], colisData: [], epiData: [], epiValide: false,
   epiEquipeSelectionnee: '',
-  modeTest: false,
+  modeTest: false, sessionColis: 1,
   toutesVacations: [], adminVue: 'liste',
 };
 
@@ -160,9 +160,10 @@ function fmtDate(d){ return new Date(d).toLocaleDateString('fr-FR',{weekday:'lon
 function fmtHeure(iso){ if(!iso) return '—'; const d=new Date(iso.endsWith('Z')?iso:iso+'Z'); return d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}); }
 function getToday(){ return new Date().toISOString().split('T')[0]; }
 
-function calcMoyenneColis(){
-  // Moyenne globale (première → dernière saisie)
-  const data = S.colisData.filter(c=>c.quantite_colis&&c.heure_controle);
+function calcMoyenneColis(session){
+  // Moyenne globale (première → dernière saisie) pour une session
+  const sess = session || S.sessionColis || 1;
+  const data = S.colisData.filter(c=>c.quantite_colis&&c.heure_controle&&(c.session_numero||1)===sess);
   if(data.length < 2) return null;
   const sorted = [...data].sort((a,b)=>a.heure_controle.localeCompare(b.heure_controle));
   const first = sorted[0], last = sorted[sorted.length-1];
@@ -335,9 +336,9 @@ function renderColis(){
       </tr></thead>
       <tbody>
         ${(()=>{
-          const sorted = [...S.colisData].filter(c=>c.quantite_colis&&c.heure_controle).sort((a,b)=>a.heure_controle.localeCompare(b.heure_controle));
+          const sorted = [...S.colisData].filter(c=>c.quantite_colis&&c.heure_controle&&(c.session_numero||1)===sessionActuelle).sort((a,b)=>a.heure_controle.localeCompare(b.heure_controle));
           return tranches.map(tranche=>{
-            const c = S.colisData.find(x=>x.tranche===tranche)||{};
+            const c = S.colisData.find(x=>x.tranche===tranche&&(x.session_numero||1)===sessionActuelle)||{};
             const idx = sorted.findIndex(x=>x.tranche===tranche);
             const moyTranche = idx>0 ? calcMoyenneTraanche(sorted,idx) : null;
             const moyColor = moyTranche ? (moyTranche>=OBJECTIF_COLIS?'var(--vert)':'var(--rouge)') : 'var(--texte-doux)';
@@ -707,7 +708,7 @@ async function sauvegarderColis(tranche, champ, valeur){
     const autoCadence = (champ==='quantite_colis' && valeur) ? (valeur>=OBJECTIF_COLIS) : null;
     
     if(!c){
-      const body = {vacation_id:S.vacationId, tranche, [champ]:valeur};
+      const body = {vacation_id:S.vacationId, tranche, session_numero: S.sessionColis||1, [champ]:valeur};
       if(autoHeure) body.heure_controle = autoHeure;
       if(autoCadence!==null) body.cadence_ok = autoCadence;
       const created = await db.post('controles_colis', body);
@@ -766,6 +767,14 @@ function renderPDF(){
     </div>
     <button class="btn-primary" onclick="exporterPDF()">🖨️ Générer le PDF</button>
   </div>`;
+}
+
+function nouvelleSession(){
+  const sessions = [...new Set((S.colisData||[]).map(c=>c.session_numero||1))];
+  const maxSession = Math.max(...sessions, 0);
+  S.sessionColis = maxSession + 1;
+  toast(`✅ Nouvelle session ${S.sessionColis} démarrée`,'ok');
+  render();
 }
 
 async function ajouterEPI(){
