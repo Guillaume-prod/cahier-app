@@ -851,6 +851,20 @@ function exporterPDF(){
 
 render();
 
+// ── SERVICE WORKER ────────────────────────────────────────────
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('/cahier-app/sw.js').then(reg=>{
+    console.log('SW registered');
+  }).catch(e=>console.warn('SW error', e));
+  
+  // Écouter les messages du SW pour reprogrammer
+  navigator.serviceWorker.addEventListener('message', e=>{
+    if(e.data && e.data.type==='RESCHEDULE'){
+      programmmerProchainRappel();
+    }
+  });
+}
+
 // ── NOTIFICATIONS ─────────────────────────────────────────────
 async function demanderPermissionNotif(){
   if(!('Notification' in window)) return;
@@ -878,26 +892,41 @@ function envoyerNotif(titre, corps){
 
 let rappelColisInterval = null;
 
-function demarrerRappelColis(){
-  if(rappelColisInterval) clearInterval(rappelColisInterval);
-  // Calculer le délai jusqu'à la prochaine heure pile
+function programmmerProchainRappel(){
+  if(Notification.permission !== 'granted') return;
   const now = new Date();
   const msJusquaProchainHeure = (60 - now.getMinutes()) * 60 * 1000 - now.getSeconds() * 1000;
   
-  // Premier rappel à la prochaine heure pile
-  setTimeout(()=>{
-    envoyerNotif('📦 Rappel relevé colis', 'Pense à saisir le relevé colis dans le cahier de vacation !');
-    // Puis toutes les heures
-    rappelColisInterval = setInterval(()=>{
-      envoyerNotif('📦 Rappel relevé colis', 'Pense à saisir le relevé colis dans le cahier de vacation !');
-    }, 60 * 60 * 1000);
-  }, msJusquaProchainHeure);
+  // Envoyer au Service Worker
+  if(navigator.serviceWorker.controller){
+    navigator.serviceWorker.controller.postMessage({
+      type: 'SCHEDULE_NOTIF',
+      delay: msJusquaProchainHeure
+    });
+  } else {
+    // Fallback local si SW pas encore actif
+    if(rappelColisInterval) clearInterval(rappelColisInterval);
+    setTimeout(()=>{
+      envoyerNotif('📦 Rappel relevé colis', 'Pense à saisir le relevé colis !');
+      rappelColisInterval = setInterval(()=>{
+        envoyerNotif('📦 Rappel relevé colis', 'Pense à saisir le relevé colis !');
+      }, 60*60*1000);
+    }, msJusquaProchainHeure);
+  }
+}
+
+function demarrerRappelColis(){
+  programmmerProchainRappel();
 }
 
 function arreterRappelColis(){
   if(rappelColisInterval){
     clearInterval(rappelColisInterval);
     rappelColisInterval = null;
+  }
+  // Signaler au SW d'arrêter
+  if(navigator.serviceWorker.controller){
+    navigator.serviceWorker.controller.postMessage({type: 'STOP_NOTIF'});
   }
 }
 </script>
