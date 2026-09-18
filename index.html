@@ -569,6 +569,9 @@ async function connexion(){
     S.loading = true; render();
     await chargerTout();
     S.loading = false; render();
+    // Demander permission notifications et démarrer rappels
+    await demanderPermissionNotif();
+    demarrerRappelColis();
   }catch(e){ toast('Erreur connexion','err'); }
 }
 
@@ -594,12 +597,14 @@ async function changerCode(){
 }
 
 function deconnexion(){
+  arreterRappelColis();
   S = {agent:null, vue:'epi', loading:false, vacationId:null, date:getToday(), controles:[], colisData:[], epiData:[], epiValide:false, tournees:[], toutesVacations:[], adminVue:'liste', modalAgent:null, tousAgents:[]};
   render();
 }
 
 async function finVacation(){
   if(!confirm('Terminer cette vacation ?')) return;
+  arreterRappelColis();
   S.vacationId = null;
   S.epiValide = false;
   S.controles = [];
@@ -845,6 +850,56 @@ function exporterPDF(){
 }
 
 render();
+
+// ── NOTIFICATIONS ─────────────────────────────────────────────
+async function demanderPermissionNotif(){
+  if(!('Notification' in window)) return;
+  if(Notification.permission === 'default'){
+    await Notification.requestPermission();
+  }
+}
+
+function envoyerNotif(titre, corps){
+  if(Notification.permission !== 'granted') return;
+  const notif = new Notification(titre, {
+    body: corps,
+    icon: 'https://guillaume-prod.github.io/cahier-app/favicon.png',
+    badge: 'https://guillaume-prod.github.io/cahier-app/favicon.png',
+    tag: 'rappel-colis',
+    renotify: true,
+  });
+  notif.onclick = () => {
+    window.focus();
+    S.vue = 'colis';
+    render();
+    notif.close();
+  };
+}
+
+let rappelColisInterval = null;
+
+function demarrerRappelColis(){
+  if(rappelColisInterval) clearInterval(rappelColisInterval);
+  // Calculer le délai jusqu'à la prochaine heure pile
+  const now = new Date();
+  const msJusquaProchainHeure = (60 - now.getMinutes()) * 60 * 1000 - now.getSeconds() * 1000;
+  
+  // Premier rappel à la prochaine heure pile
+  setTimeout(()=>{
+    envoyerNotif('📦 Rappel relevé colis', 'Pense à saisir le relevé colis dans le cahier de vacation !');
+    // Puis toutes les heures
+    rappelColisInterval = setInterval(()=>{
+      envoyerNotif('📦 Rappel relevé colis', 'Pense à saisir le relevé colis dans le cahier de vacation !');
+    }, 60 * 60 * 1000);
+  }, msJusquaProchainHeure);
+}
+
+function arreterRappelColis(){
+  if(rappelColisInterval){
+    clearInterval(rappelColisInterval);
+    rappelColisInterval = null;
+  }
+}
 </script>
 </body>
 </html>
