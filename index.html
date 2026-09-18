@@ -160,6 +160,7 @@ function fmtHeure(iso){ if(!iso) return '—'; const d=new Date(iso.endsWith('Z'
 function getToday(){ return new Date().toISOString().split('T')[0]; }
 
 function calcMoyenneColis(){
+  // Moyenne globale (première → dernière saisie)
   const data = S.colisData.filter(c=>c.quantite_colis&&c.heure_controle);
   if(data.length < 2) return null;
   const sorted = [...data].sort((a,b)=>a.heure_controle.localeCompare(b.heure_controle));
@@ -168,10 +169,33 @@ function calcMoyenneColis(){
   const [lh,lm] = last.heure_controle.split(':').map(Number);
   let dureeMin = (lh*60+lm)-(fh*60+fm);
   if(dureeMin<=0) dureeMin+=24*60;
-  if(dureeMin===0) return null;
+  // Déduire les arrêts machine cumulés totaux
+  const totalArret = last.arret_machine_cumul||0;
+  const dureeEffective = Math.max(1, dureeMin - totalArret);
   const totalColis = last.quantite_colis - first.quantite_colis;
-  if(totalColis<=0) return Math.round((last.quantite_colis/dureeMin)*60);
-  return Math.round((totalColis/dureeMin)*60);
+  if(totalColis<=0) return Math.round((last.quantite_colis/dureeEffective)*60);
+  return Math.round((totalColis/dureeEffective)*60);
+}
+
+function calcMoyenneTraanche(sorted, index){
+  // Moyenne entre avant-dernière et dernière saisie
+  if(index < 1) return null;
+  const prev = sorted[index-1];
+  const curr = sorted[index];
+  if(!prev.quantite_colis || !curr.quantite_colis) return null;
+  const [ph,pm] = prev.heure_controle.split(':').map(Number);
+  const [ch,cm] = curr.heure_controle.split(':').map(Number);
+  let dureeMin = (ch*60+cm)-(ph*60+pm);
+  if(dureeMin<=0) dureeMin+=24*60;
+  if(dureeMin===0) return null;
+  // Déduire uniquement les nouveaux arrêts de cette tranche
+  const arretPrev = prev.arret_machine_cumul||0;
+  const arretCurr = curr.arret_machine_cumul||0;
+  const arretTranche = Math.max(0, arretCurr - arretPrev);
+  const dureeEffective = Math.max(1, dureeMin - arretTranche);
+  const diffColis = curr.quantite_colis - prev.quantite_colis;
+  if(diffColis<=0) return null;
+  return Math.round((diffColis/dureeEffective)*60);
 }
 
 // ── RENDER ─────────────────────────────────────────────────────
@@ -306,23 +330,30 @@ function renderColis(){
     </div>
     <table class="table-suivi">
       <thead><tr>
-        <th>Tranche</th><th>Camion + H début</th><th>H contrôle</th><th>Qté colis</th><th>Cadence</th>
+        <th>Tranche</th><th>Camion + H</th><th>H relevé</th><th style="min-width:90px">Qté colis</th><th>Moy/h</th><th>Arrêt (min cumul)</th><th>Cadence</th>
       </tr></thead>
       <tbody>
-        ${tranches.map(tranche=>{
-          const c = S.colisData.find(x=>x.tranche===tranche)||{};
-          const ok = c.quantite_colis ? (c.cadence_ok!==false) : null;
-          return `<tr>
-            <td style="font-weight:600;font-size:11px">${tranche}</td>
-            <td><input style="width:100%;border:none;background:transparent;font-size:11px;text-align:center" type="text" placeholder="—" value="${c.camion_h_debut||''}" onchange="sauvegarderColis('${tranche}','camion_h_debut',this.value)" /></td>
-            <td style="font-size:11px;text-align:center;font-weight:600;color:var(--bleu)">${c.heure_controle||'—'}</td>
-            <td><input style="width:70px;border:none;background:transparent;font-size:12px;font-weight:700;text-align:center" type="number" placeholder="—" value="${c.quantite_colis||''}" onchange="sauvegarderColis('${tranche}','quantite_colis',parseInt(this.value)||null)" /></td>
-            <td style="font-weight:700;color:${c.quantite_colis?(c.quantite_colis>=OBJECTIF_COLIS?'var(--vert)':'var(--rouge)'):'var(--texte-doux)'}">
-              ${c.quantite_colis?(c.quantite_colis>=OBJECTIF_COLIS?'✅ OK':'❌ NOK'):'—'}
-            </td>
-          </tr>
-          ${(c.quantite_colis&&c.quantite_colis<OBJECTIF_COLIS)?`<tr style="background:var(--orange-pale)"><td colspan="5"><input style="width:100%;border:none;background:transparent;font-size:11px;padding:4px" type="text" placeholder="Raison si cadence non atteinte..." value="${c.raison_non_atteinte||''}" onchange="sauvegarderColis('${tranche}','raison_non_atteinte',this.value)" /></td></tr>`:''}`;
-        }).join('')}
+        ${(()=>{
+          const sorted = [...S.colisData].filter(c=>c.quantite_colis&&c.heure_controle).sort((a,b)=>a.heure_controle.localeCompare(b.heure_controle));
+          return tranches.map(tranche=>{
+            const c = S.colisData.find(x=>x.tranche===tranche)||{};
+            const idx = sorted.findIndex(x=>x.tranche===tranche);
+            const moyTranche = idx>0 ? calcMoyenneTraanche(sorted,idx) : null;
+            const moyColor = moyTranche ? (moyTranche>=OBJECTIF_COLIS?'var(--vert)':'var(--rouge)') : 'var(--texte-doux)';
+            return `<tr>
+              <td style="font-weight:600;font-size:11px">${tranche}</td>
+              <td><input style="width:100%;border:none;background:transparent;font-size:11px;text-align:center" type="text" placeholder="—" value="${c.camion_h_debut||''}" onchange="sauvegarderColis('${tranche}','camion_h_debut',this.value)" /></td>
+              <td style="font-size:11px;text-align:center;font-weight:600;color:var(--bleu)">${c.heure_controle||'—'}</td>
+              <td><input style="width:90px;border:1.5px solid var(--gris-bord);border-radius:8px;background:white;font-size:15px;font-weight:700;text-align:center;padding:6px 4px" type="number" placeholder="—" value="${c.quantite_colis||''}" onchange="sauvegarderColis('${tranche}','quantite_colis',parseInt(this.value)||null)" /></td>
+              <td style="font-weight:700;color:${moyColor};font-size:13px;text-align:center">${moyTranche||'—'}</td>
+              <td><input style="width:70px;border:1.5px solid var(--gris-bord);border-radius:8px;background:white;font-size:13px;text-align:center;padding:5px 4px" type="number" placeholder="0" value="${c.arret_machine_cumul||''}" onchange="sauvegarderColis('${tranche}','arret_machine_cumul',parseInt(this.value)||0)" /></td>
+              <td style="font-weight:700;color:${c.quantite_colis?(c.quantite_colis>=OBJECTIF_COLIS?'var(--vert)':'var(--rouge)'):'var(--texte-doux)'}">
+                ${c.quantite_colis?(c.quantite_colis>=OBJECTIF_COLIS?'✅':'❌'):'—'}
+              </td>
+            </tr>
+            ${(c.quantite_colis&&c.quantite_colis<OBJECTIF_COLIS)?`<tr style="background:var(--orange-pale)"><td colspan="7"><input style="width:100%;border:none;background:transparent;font-size:11px;padding:4px" type="text" placeholder="Raison..." value="${c.raison_non_atteinte||''}" onchange="sauvegarderColis('${tranche}','raison_non_atteinte',this.value)" /></td></tr>`:''}`;
+          }).join('');
+        })()}
       </tbody>
     </table>
   </div>`;
