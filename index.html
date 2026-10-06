@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="fr">
 <head>
@@ -97,9 +96,11 @@ select.form-input{cursor:pointer;}
 <body>
 <div id="app"></div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script>
 const SUPABASE_URL = 'https://cogducsipchjuxsafuqv.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_qDyP53AXFSqqLghWV70FNw_wSreDYSz';
+const supabaseAuth = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
 const TRANCHES_MATIN = ['00h00 - 01h00','01h00 - 02h00','02h00 - 03h00','03h00 - 04h00','04h00 - 05h00','05h00 - 06h00','06h00 - 07h00','07h00 - 08h00'];
 const TRANCHES_SOIREE = ['15h00 - 16h00','17h00 - 18h00','18h00 - 19h00','19h00 - 20h00','20h00 - 21h00','21h00 - 22h00','22h00 - 23h00','23h00 - 00h00','00h00 - 01h00'];
@@ -130,6 +131,7 @@ let S = {
   epiEquipeSelectionnee: '',
   modeTest: false, sessionColis: 1,
   toutesVacations: [], adminVue: 'liste',
+  authSession: null,
 };
 
 // ── DB ──────────────────────────────────────────────────────────
@@ -251,11 +253,11 @@ function renderLogin(){
         <input class="form-input" id="login-prenom" type="text" placeholder="Votre prénom" autocomplete="off" />
       </div>
       <div class="form-group">
-        <label class="form-label">Code d'accès</label>
-        <input class="form-input" id="login-code" type="password" placeholder="••••" />
+        <label class="form-label">Mot de passe</label>
+        <input class="form-input" id="login-code" type="password" placeholder="••••••" />
       </div>
       <button class="btn-primary" onclick="connexion()">Se connecter</button>
-      <div class="login-error" id="login-error">Prénom ou code incorrect</div>
+      <div class="login-error" id="login-error">Prénom ou mot de passe incorrect</div>
     </div>
   </div>`;
 }
@@ -561,26 +563,35 @@ function renderAdminEPI(){
 // ── ACTIONS ────────────────────────────────────────────────────
 async function connexion(){
   const prenom = document.getElementById('login-prenom')?.value.trim();
-  const code = document.getElementById('login-code')?.value.trim();
-  if(!prenom||!code) return;
+  const mdp = document.getElementById('login-code')?.value.trim();
+  if(!prenom||!mdp){ document.getElementById('login-error').style.display='block'; return; }
   try{
-    const res = await db.get('agents',`prenom=ilike.${encodeURIComponent(prenom)}&code_acces=eq.${encodeURIComponent(code)}&select=*`);
-    if(!res.length){ document.getElementById('login-error').style.display='block'; return; }
-    S.agent = res[0];
+    // Trouver l'email correspondant au prénom dans la table agents
+    const agentRes = await db.get('agents',`prenom=ilike.${encodeURIComponent(prenom)}&select=*`);
+    if(!agentRes.length){ document.getElementById('login-error').style.display='block'; return; }
+    const agentData = agentRes[0];
+    if(!agentData.email){ document.getElementById('login-error').style.display='block'; return; }
+    // Connexion via Supabase Auth
+    const { data, error } = await supabaseAuth.auth.signInWithPassword({
+      email: agentData.email,
+      password: mdp
+    });
+    if(error){ document.getElementById('login-error').style.display='block'; return; }
+    S.agent = agentData;
+    S.authSession = data.session;
     S.loading = true; render();
     await chargerTout();
     S.loading = false; render();
-    // Demander permission notifications et démarrer rappels
     await demanderPermissionNotif();
     demarrerRappelColis();
-  }catch(e){ toast('Erreur connexion','err'); }
+  }catch(e){ toast('Erreur connexion','err'); console.error(e); }
 }
 
 function renderChangerCode(){
   return `<div class="card">
-    <div class="card-title">🔑 Changer mon code d'accès</div>
-    <div class="form-group"><label class="form-label">Nouveau code</label><input class="form-input" id="new-code" type="password" placeholder="Nouveau code" /></div>
-    <div class="form-group"><label class="form-label">Confirmer le code</label><input class="form-input" id="confirm-code" type="password" placeholder="Confirmer" /></div>
+    <div class="card-title">🔑 Changer mon mot de passe</div>
+    <div class="form-group"><label class="form-label">Nouveau mot de passe</label><input class="form-input" id="new-code" type="password" placeholder="Minimum 6 caractères" /></div>
+    <div class="form-group"><label class="form-label">Confirmer le mot de passe</label><input class="form-input" id="confirm-code" type="password" placeholder="Confirmer" /></div>
     <button class="btn-primary" onclick="changerCode()">✅ Enregistrer</button>
   </div>`;
 }
@@ -588,18 +599,20 @@ async function changerCode(){
   const n = document.getElementById('new-code')?.value.trim();
   const c = document.getElementById('confirm-code')?.value.trim();
   if(!n||!c) return toast('Remplis les deux champs','err');
-  if(n!==c) return toast('Les codes ne correspondent pas','err');
-  if(n.length<3) return toast('Code trop court (min 3 caractères)','err');
+  if(n!==c) return toast('Les mots de passe ne correspondent pas','err');
+  if(n.length<6) return toast('Mot de passe trop court (min 6 caractères)','err');
   try{
-    await db.patch('agents',`id=eq.${S.agent.id}`,{code_acces:n});
-    S.agent.code_acces = n;
-    toast('✅ Code modifié !','ok');
+    const { error } = await supabaseAuth.auth.updateUser({ password: n });
+    if(error) return toast('Erreur : '+error.message,'err');
+    toast('✅ Mot de passe modifié !','ok');
+    S.vue = 'epi'; render();
   }catch(e){ toast('Erreur','err'); }
 }
 
-function deconnexion(){
+async function deconnexion(){
   arreterRappelColis();
-  S = {agent:null, vue:'epi', loading:false, vacationId:null, date:getToday(), controles:[], colisData:[], epiData:[], epiValide:false, tournees:[], toutesVacations:[], adminVue:'liste', modalAgent:null, tousAgents:[]};
+  await supabaseAuth.auth.signOut();
+  S = {agent:null, vue:'epi', loading:false, vacationId:null, date:getToday(), controles:[], colisData:[], epiData:[], epiValide:false, tournees:[], toutesVacations:[], adminVue:'liste', modalAgent:null, tousAgents:[], authSession:null};
   render();
 }
 
