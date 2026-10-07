@@ -351,6 +351,7 @@ function renderColis(){
   const moy = calcMoyenneColis();
   const moyColor = moy ? (moy>=OBJECTIF_COLIS?'var(--vert)':'var(--rouge)') : 'var(--texte-doux)';
   
+  const sessionActuelle = S.sessionColis||1;
   return `<div class="card">
     <div class="card-title">📦 Contrôle Colis/H — Objectif ${OBJECTIF_COLIS} colis/h</div>
     <div style="display:flex;gap:10px;margin-bottom:14px">
