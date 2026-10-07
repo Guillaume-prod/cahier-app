@@ -1,39 +1,56 @@
-// Service Worker — Cahier de Vacation MLH
-const CACHE_NAME = 'cahier-mlh-v1';
+const CACHE_NAME = 'cahier-mlh-v10'; // Incrémenter cette version force le rechargement
+const urlsToCache = [
+  '/cahier-app/',
+  '/cahier-app/index.html',
+  '/cahier-app/cahier-app.html'
+];
 
-self.addEventListener('install', e => {
-  self.skipWaiting();
-});
-
-self.addEventListener('activate', e => {
-  e.waitUntil(clients.claim());
-});
-
-// Recevoir un message pour programmer une notification
+// Forcer la prise en main immédiate
 self.addEventListener('message', e => {
-  if(e.data && e.data.type === 'SCHEDULE_NOTIF'){
-    // Programmer la notification à l'heure demandée
-    const delay = e.data.delay;
-    setTimeout(()=>{
-      self.registration.showNotification('📦 Rappel relevé colis', {
-        body: 'Pense à saisir le relevé colis dans le cahier de vacation !',
-        icon: '/cahier-app/icon.png',
-        badge: '/cahier-app/icon.png',
-        tag: 'rappel-colis',
-        renotify: true,
-        data: { url: '/cahier-app/?onglet=colis' }
-      });
-      // Reprogrammer pour la prochaine heure
+  if (e.data && e.data.type === 'SKIP_WAITING') self.skipWaiting();
+  if (e.data && e.data.type === 'SCHEDULE_NOTIF') {
+    // Reprogrammer la notification
+    const { delay } = e.data;
+    setTimeout(() => {
       self.clients.matchAll().then(clients => {
-        clients.forEach(client => client.postMessage({type: 'RESCHEDULE'}));
+        clients.forEach(c => c.postMessage({ type: 'RESCHEDULE' }));
       });
     }, delay);
   }
+  if (e.data && e.data.type === 'STOP_NOTIF') {
+    // Rien à faire côté SW pour arrêter
+  }
 });
 
-self.addEventListener('notificationclick', e => {
-  e.notification.close();
+self.addEventListener('install', e => {
+  self.skipWaiting(); // Prendre le contrôle immédiatement
   e.waitUntil(
-    clients.openWindow('/cahier-app/')
+    caches.open(CACHE_NAME).then(cache => cache.addAll(urlsToCache)).catch(() => {})
+  );
+});
+
+self.addEventListener('activate', e => {
+  e.waitUntil(
+    caches.keys().then(keys =>
+      Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))
+    ).then(() => self.clients.claim()) // Prendre le contrôle de tous les onglets ouverts
+  );
+});
+
+self.addEventListener('fetch', e => {
+  // Ne pas cacher les requêtes Supabase — toujours réseau
+  if (e.request.url.includes('supabase')) {
+    e.respondWith(fetch(e.request));
+    return;
+  }
+  // Pour les autres : réseau d'abord, cache en fallback
+  e.respondWith(
+    fetch(e.request).then(res => {
+      if (res && res.status === 200) {
+        const clone = res.clone();
+        caches.open(CACHE_NAME).then(cache => cache.put(e.request, clone));
+      }
+      return res;
+    }).catch(() => caches.match(e.request))
   );
 });
