@@ -377,16 +377,16 @@ function renderColis(){
             const moyColor = moyTranche ? (moyTranche>=OBJECTIF_COLIS?'var(--vert)':'var(--rouge)') : 'var(--texte-doux)';
             return `<tr>
               <td style="font-weight:600;font-size:11px">${tranche}</td>
-              <td><input style="width:100%;border:none;background:transparent;font-size:11px;text-align:center" type="text" placeholder="—" value="${c.camion_h_debut||''}" onchange="sauvegarderColis('${tranche}','camion_h_debut',this.value)" /></td>
-              <td style="text-align:center">${S.modeTest?`<input style="width:75px;border:1.5px solid var(--orange);border-radius:6px;font-size:11px;text-align:center;padding:4px" type="time" value="${c.heure_controle||''}" onchange="sauvegarderColis('${tranche}','heure_controle',this.value)" />`:`<span style="font-size:11px;font-weight:600;color:var(--bleu)">${c.heure_controle||'—'}</span>`}</td>
-              <td><input style="width:90px;border:1.5px solid var(--gris-bord);border-radius:8px;background:white;font-size:15px;font-weight:700;text-align:center;padding:6px 4px" type="number" placeholder="—" value="${c.quantite_colis||''}" onchange="sauvegarderColis('${tranche}','quantite_colis',parseInt(this.value)||null)" /></td>
+              <td><input style="width:100%;border:none;background:transparent;font-size:11px;text-align:center" type="text" placeholder="—" value="${c.camion_h_debut||''}" onblur="sauvegarderColis('${tranche}','camion_h_debut',this.value)" /></td>
+              <td style="text-align:center"><input style="width:75px;border:1.5px solid var(--gris-bord);border-radius:6px;font-size:11px;text-align:center;padding:4px" type="time" value="${c.heure_controle||''}" onchange="sauvegarderColis('${tranche}','heure_controle',this.value)" /></td>
+              <td><input style="width:90px;border:1.5px solid var(--gris-bord);border-radius:8px;background:white;font-size:15px;font-weight:700;text-align:center;padding:6px 4px" type="number" placeholder="—" value="${c.quantite_colis||''}" onblur="sauvegarderColis('${tranche}','quantite_colis',parseInt(this.value)||null)" /></td>
               <td style="font-weight:700;color:${moyColor};font-size:13px;text-align:center">${moyTranche||'—'}</td>
-              <td><input style="width:70px;border:1.5px solid var(--gris-bord);border-radius:8px;background:white;font-size:13px;text-align:center;padding:5px 4px" type="number" placeholder="0" value="${c.arret_machine_cumul||''}" onchange="sauvegarderColis('${tranche}','arret_machine_cumul',parseInt(this.value)||0)" /></td>
-              <td style="font-weight:700;color:${c.quantite_colis?(c.quantite_colis>=OBJECTIF_COLIS?'var(--vert)':'var(--rouge)'):'var(--texte-doux)'}">
-                ${c.quantite_colis?(c.quantite_colis>=OBJECTIF_COLIS?'✅':'❌'):'—'}
+              <td><input style="width:70px;border:1.5px solid var(--gris-bord);border-radius:8px;background:white;font-size:13px;text-align:center;padding:5px 4px" type="number" placeholder="0" value="${c.arret_machine_cumul||''}" onblur="sauvegarderColis('${tranche}','arret_machine_cumul',parseInt(this.value)||0)" /></td>
+              <td data-tranche="${tranche}" style="font-weight:700;color:${c.quantite_colis?(c.quantite_colis>=OBJECTIF_COLIS?'var(--vert)':'var(--rouge)'):'var(--texte-doux)'}">
+                <span class="cadence-icone">${c.quantite_colis?(c.quantite_colis>=OBJECTIF_COLIS?'✅':'❌'):'—'}</span>
               </td>
             </tr>
-            ${(c.quantite_colis&&c.quantite_colis<OBJECTIF_COLIS)?`<tr style="background:var(--orange-pale)"><td colspan="7"><input style="width:100%;border:none;background:transparent;font-size:11px;padding:4px" type="text" placeholder="Raison..." value="${c.raison_non_atteinte||''}" onchange="sauvegarderColis('${tranche}','raison_non_atteinte',this.value)" /></td></tr>`:''}`;
+            ${(c.quantite_colis&&c.quantite_colis<OBJECTIF_COLIS)?`<tr style="background:var(--orange-pale)"><td colspan="7"><input style="width:100%;border:none;background:transparent;font-size:11px;padding:4px" type="text" placeholder="Raison..." value="${c.raison_non_atteinte||''}" onblur="sauvegarderColis('${tranche}','raison_non_atteinte',this.value)" /></td></tr>`:''}`;
           }).join('');
         })()}
       </tbody>
@@ -777,18 +777,19 @@ async function sauvegarderTournee(numControle, numTournee, champ, valeur){
 // ── SAUVEGARDE COLIS ────────────────────────────────────────────
 async function sauvegarderColis(tranche, champ, valeur){
   try{
-    let c = S.colisData.find(x=>x.tranche===tranche);
-    // Si on saisit la quantité et que l'heure n'est pas encore renseignée, on l'auto-remplit
+    if(!S.vacationId){ toast('Session non initialisée','err'); return; }
+    const sessionNum = S.sessionColis||1;
+    let c = S.colisData.find(x=>x.tranche===tranche&&(x.session_numero||1)===sessionNum);
     const now = new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
-    const autoHeure = (!S.modeTest && champ==='quantite_colis' && (!c||!c.heure_controle)) ? now : null;
-    const autoCadence = (champ==='quantite_colis' && valeur) ? (valeur>=OBJECTIF_COLIS) : null;
-    
+    const autoHeure = (champ==='quantite_colis' && valeur && (!c||!c.heure_controle)) ? now : null;
+    const autoCadence = (champ==='quantite_colis' && valeur!=null) ? (valeur>=OBJECTIF_COLIS) : null;
+
     if(!c){
-      const body = {vacation_id:S.vacationId, tranche, session_numero: S.sessionColis||1, [champ]:valeur};
+      const body = {vacation_id:S.vacationId, tranche, session_numero:sessionNum, [champ]:valeur};
       if(autoHeure) body.heure_controle = autoHeure;
       if(autoCadence!==null) body.cadence_ok = autoCadence;
       const created = await db.post('controles_colis', body);
-      S.colisData.push(created[0]);
+      if(created && created[0]) S.colisData.push(created[0]);
     } else {
       const body = {[champ]:valeur};
       if(autoHeure) body.heure_controle = autoHeure;
@@ -798,7 +799,18 @@ async function sauvegarderColis(tranche, champ, valeur){
       if(autoHeure) c.heure_controle = autoHeure;
       if(autoCadence!==null) c.cadence_ok = autoCadence;
     }
-    if(champ==='cadence_ok'||champ==='quantite_colis') render();
+    // Re-render uniquement pour mettre à jour l'indicateur cadence (✅/❌), sans perturber le focus
+    if(champ==='quantite_colis'){
+      // Mise à jour visuelle légère sans re-render complet
+      const row = document.querySelector(`[data-tranche="${tranche}"]`);
+      if(row){
+        const val = parseInt(valeur)||0;
+        const icone = row.querySelector('.cadence-icone');
+        if(icone) icone.textContent = val>=OBJECTIF_COLIS?'✅':'❌';
+        const couleur = val>=OBJECTIF_COLIS?'var(--vert)':'var(--rouge)';
+        if(icone) icone.style.color = couleur;
+      }
+    }
   }catch(e){ toast('Erreur sauvegarde','err'); }
 }
 
