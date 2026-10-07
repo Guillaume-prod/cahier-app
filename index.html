@@ -968,6 +968,17 @@ render();
 if('serviceWorker' in navigator){
   navigator.serviceWorker.register('/cahier-app/sw.js').then(reg=>{
     console.log('SW registered');
+    // Forcer la mise à jour immédiate du SW à chaque chargement
+    reg.update();
+    if(reg.waiting){ reg.waiting.postMessage({type:'SKIP_WAITING'}); }
+    reg.addEventListener('updatefound', ()=>{
+      const newSW = reg.installing;
+      if(newSW){ newSW.addEventListener('statechange', ()=>{
+        if(newSW.state==='installed' && navigator.serviceWorker.controller){
+          newSW.postMessage({type:'SKIP_WAITING'});
+        }
+      }); }
+    });
   }).catch(e=>console.warn('SW error', e));
   
   // Écouter les messages du SW pour reprogrammer
