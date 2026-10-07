@@ -203,7 +203,10 @@ function render(){
   else if(S.vue==='code') content = renderChangerCode();
   else if(!S.epiValide && !S.agent.est_responsable) content = renderEPIBlocage();
   else if(S.vue==='chantiers') content = renderChantiers();
-  else if(S.vue==='colis') content = renderColis();
+  else if(S.vue==='colis'){
+    try{ content = renderColis(); }
+    catch(e){ content = `<div class="card" style="background:#fee2e2;border:2px solid #dc2626"><div style="font-weight:700;color:#dc2626;margin-bottom:8px">❌ Erreur renderColis</div><div style="font-size:12px;font-family:monospace;white-space:pre-wrap">${e.message}\n\n${e.stack}</div></div>`; }
+  }
   else if(S.vue==='pdf') content = renderPDF();
   else if(S.vue==='admin') content = renderAdmin();
   
