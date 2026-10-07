@@ -925,7 +925,7 @@ function exporterPDF(){
       <span style="color:white;font-weight:700;font-size:15px">📄 Aperçu PDF</span>
       <div style="display:flex;gap:8px">
         <button onclick="window.print()" style="padding:8px 16px;background:white;color:#1a56a0;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">🖨️ Imprimer</button>
-        <button onclick="document.getElementById('pdf-overlay').remove()" style="padding:8px 14px;background:rgba(255,255,255,0.2);color:white;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">✕ Fermer</button>
+        <button onclick="fermerPDF()" style="padding:8px 14px;background:rgba(255,255,255,0.2);color:white;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">✕ Fermer</button>
       </div>
     </div>
     <div id="pdf-content">${contenu}</div>
@@ -937,7 +937,13 @@ function exporterPDF(){
   style.id = 'print-style';
   style.textContent = `@media print { body > *:not(#pdf-overlay) { display:none !important; } #pdf-overlay > div:first-child { display:none !important; } #pdf-overlay { position:static !important; } }`;
   document.head.appendChild(style);
-  overlay.addEventListener('remove', ()=>{ document.getElementById('print-style')?.remove(); });
+}
+
+function fermerPDF(){
+  const overlay = document.getElementById('pdf-overlay');
+  if(overlay) overlay.remove();
+  const style = document.getElementById('print-style');
+  if(style) style.remove();
 }
 
 render();
