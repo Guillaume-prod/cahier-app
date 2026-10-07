@@ -106,23 +106,8 @@ const TRANCHES_MATIN = ['00h00 - 01h00','01h00 - 02h00','02h00 - 03h00','03h00 -
 const TRANCHES_SOIREE = ['15h00 - 16h00','17h00 - 18h00','18h00 - 19h00','19h00 - 20h00','20h00 - 21h00','21h00 - 22h00','22h00 - 23h00','23h00 - 00h00','00h00 - 01h00'];
 const OBJECTIF_COLIS = 2400;
 
-const PERSONNEL = {
-  'Matin': [
-    'BACHA Ismaïl','BACHA Soulaymane','BEJAOUI Béchir','BOUKHEMERRA Niasse',
-    'BOUKOURIDA Mohamed','BRIN Grégory','DI SCIULLO Danielle','ERTLE Kévin',
-    'HAITHAM Wali','HAMIMSA Mohamed','LUSTENBERGER Yann','LY Faty',
-    'MERIMECHE Zora','MOUSSA OSMAN Rezan','OBEYD WAYSSI Silave','RAFAI Abderaouf',
-    'IMLOUL Tahar','ROHM Cindy','SCHULLER Adrien','SUTTERLIN Anthony','ZAGAD Abdessamed'
-  ],
-  'Soirée': [
-    'BOUHABILA Nawfel','DALLEAU Marie-Julie','DERRI Yamina','DOGAN Gorkem',
-    'FISHER Mike','HARTZ Claude','LONGO Quentin','OUARIACHI Driss',
-    'PROUET Christopher','VERONESE Baptiste','WATRE Loic','ALERTE Romuald',
-    'AIT KASSI Hassan','ANDELKOVICS Nemanja','BAJRAMI Bahir','DE JESUS Mickael',
-    'FAKHOUR Naïma','FLECK Stéphane','KOTETS Olena','MUNGA Louison',
-    'RAHHAL Essaïd','LAALMI Firienne','WASCAT Fabrice','AHMADI Sadeq'
-  ]
-};
+// Personnel chargé dynamiquement depuis la base
+let PERSONNEL_DB = {}; // { 'Matin': [{id,prenom,nom},...], 'Aprem': [...], 'Soirée': [...] }
 
 let S = {
   agent: null, vue: 'epi', loading: false,
@@ -132,6 +117,7 @@ let S = {
   modeTest: false, sessionColis: 1,
   toutesVacations: [], adminVue: 'liste',
   authSession: null,
+  agentsSelectionnes: {}, // { controleNum: [nomComplet,...] }
 };
 
 // ── DB ──────────────────────────────────────────────────────────
@@ -263,6 +249,51 @@ function renderLogin(){
 }
 
 // ── CHANTIERS ──────────────────────────────────────────────────
+function renderSelectionAgentsChantier(n, c){
+  // Agents de l'équipe en cours (pour Aprem/Soirée : fusionner)
+  const equipe = S.agent.equipe || S.epiEquipeSelectionnee || '';
+  let agents = [];
+  if(equipe === 'Soirée' || equipe === 'Aprem'){
+    agents = [...(PERSONNEL_DB['Aprem']||[]), ...(PERSONNEL_DB['Soirée']||[])];
+  } else if(equipe === 'Matin'){
+    agents = PERSONNEL_DB['Matin']||[];
+  } else {
+    // Admin sans équipe : tous les agents
+    agents = Object.values(PERSONNEL_DB).flat();
+  }
+
+  // Noms déjà sélectionnés (stockés comme texte séparé par virgules)
+  const dejaSelectionnes = (c.noms_chantier||'').split(',').map(s=>s.trim()).filter(Boolean);
+
+  if(!agents.length) return `<input class="form-input" type="text" placeholder="Noms des agents" value="${c.noms_chantier||''}" onchange="sauvegarderControle(${n},'noms_chantier',this.value)" />`;
+
+  return `<div style="background:var(--gris);border-radius:10px;padding:10px;max-height:200px;overflow-y:auto">
+    ${agents.map(a=>{
+      const nomComplet = `${a.nom} ${a.prenom}`;
+      const key = `ch-${n}-${a.id}`;
+      const checked = dejaSelectionnes.includes(nomComplet);
+      return `<label style="display:flex;align-items:center;gap:8px;padding:5px 0;cursor:pointer;border-bottom:1px solid var(--gris-bord)">
+        <input type="checkbox" id="${key}" ${checked?'checked':''} onchange="toggleAgentChantier(${n},this)" style="width:18px;height:18px;accent-color:var(--bleu);cursor:pointer" data-nom="${nomComplet}" />
+        <span style="font-size:13px;font-weight:600">${a.nom} ${a.prenom}</span>
+      </label>`;
+    }).join('')}
+  </div>`;
+}
+
+async function toggleAgentChantier(numControle, checkbox){
+  const nom = checkbox.dataset.nom;
+  const c = S.controles.find(x=>x.numero===numControle)||{};
+  const dejaSelectionnes = (c.noms_chantier||'').split(',').map(s=>s.trim()).filter(Boolean);
+  let nouveaux;
+  if(checkbox.checked){
+    nouveaux = [...dejaSelectionnes.filter(n=>n!==nom), nom];
+  } else {
+    nouveaux = dejaSelectionnes.filter(n=>n!==nom);
+  }
+  const valeur = nouveaux.join(', ');
+  await sauvegarderControle(numControle, 'noms_chantier', valeur);
+}
+
 function renderChantiers(){
   const controles = S.controles;
   const html = [`<div class="card">
@@ -290,8 +321,8 @@ function renderChantiers(){
         </div>
       </div>
       <div class="form-group">
-        <label class="form-label">Nom(s) sur le chantier</label>
-        <input class="form-input" type="text" placeholder="Noms des agents" value="${c.noms_chantier||''}" onchange="sauvegarderControle(${n},'noms_chantier',this.value)" />
+        <label class="form-label">Agent(s) sur le chantier</label>
+        ${renderSelectionAgentsChantier(n, c)}
       </div>
       <div class="form-label" style="margin-bottom:8px">Tournées contrôlées</div>
       ${[1,2,3,4,5].map(i=>{
@@ -366,7 +397,13 @@ function renderColis(){
 // ── EPI ────────────────────────────────────────────────────────
 function renderEPI(){
   const equipe = S.agent.equipe || S.epiEquipeSelectionnee || '';
-  const personnel = PERSONNEL[equipe]||[];
+  // Pour Guillaume (admin sans équipe), Aprem = Aprem ; pour Soirée, fusionner Aprem+Soirée
+  let personnel = [];
+  if(equipe === 'Soirée' || equipe === 'Aprem'){
+    personnel = [...(PERSONNEL_DB['Aprem']||[]), ...(PERSONNEL_DB['Soirée']||[])];
+  } else if(equipe){
+    personnel = PERSONNEL_DB[equipe]||[];
+  }
   const epis = S.epiData||[];
   const manquements = epis.filter(e=>e.nom_prenom!=='RAS');
   const EPI_TYPES = ['Gants','Gilet haute visibilité','Chaussures de sécurité','Gants + Gilet','Gants + Chaussures','Gilet + Chaussures','Tout manquant'];
@@ -392,18 +429,20 @@ function renderEPI(){
       <label class="form-label">Équipe à contrôler</label>
       <div style="display:flex;gap:8px;margin-bottom:12px">
         <button onclick="S.epiEquipeSelectionnee='Matin';render()" style="flex:1;padding:12px;border-radius:10px;border:2px solid ${equipe==='Matin'?'var(--bleu)':'var(--gris-bord)'};background:${equipe==='Matin'?'var(--bleu-clair)':'white'};color:${equipe==='Matin'?'var(--bleu)':'var(--texte)'};font-weight:700;cursor:pointer">☀️ Matin</button>
-        <button onclick="S.epiEquipeSelectionnee='Soirée';render()" style="flex:1;padding:12px;border-radius:10px;border:2px solid ${equipe==='Soirée'?'var(--bleu)':'var(--gris-bord)'};background:${equipe==='Soirée'?'var(--bleu-clair)':'white'};color:${equipe==='Soirée'?'var(--bleu)':'var(--texte)'};font-weight:700;cursor:pointer">🌆 Soirée</button>
+        <button onclick="S.epiEquipeSelectionnee='Aprem';render()" style="flex:1;padding:12px;border-radius:10px;border:2px solid ${equipe==='Aprem'?'var(--bleu)':'var(--gris-bord)'};background:${equipe==='Aprem'?'var(--bleu-clair)':'white'};color:${equipe==='Aprem'?'var(--bleu)':'var(--texte)'};font-weight:700;cursor:pointer">🌆 Aprem</button>
       </div>
     </div>`:''}
     ${!equipe?`<div class="empty-state"><div class="empty-icon">👆</div><div>Sélectionne une équipe ci-dessus</div></div>`:''}
-    ${personnel.map(nom=>{
-      const epi = manquements.find(e=>e.nom_prenom===nom);
+    ${personnel.map(agent=>{
+      const nomComplet = `${agent.nom} ${agent.prenom}`;
+      const epi = manquements.find(e=>e.nom_prenom===nomComplet);
+      const key = nomComplet.replace(/[\s']/g,'_');
       return `<div style="padding:10px 0;border-bottom:1px solid var(--gris)">
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:${epi?'8px':'0'}">
-          <input type="checkbox" id="epi-${nom.replace(/\s/g,'_')}" ${epi?'checked':''} 
-            onchange="toggleEPI('${nom}',this.checked)" 
+          <input type="checkbox" id="epi-${key}" ${epi?'checked':''}
+            onchange="toggleEPI('${nomComplet}',this.checked)"
             style="width:20px;height:20px;cursor:pointer;accent-color:var(--rouge)" />
-          <label for="epi-${nom.replace(/\s/g,'_')}" style="font-size:14px;font-weight:600;cursor:pointer;flex:1">${nom}</label>
+          <label for="epi-${key}" style="font-size:14px;font-weight:600;cursor:pointer;flex:1">${agent.nom} ${agent.prenom}</label>
           ${epi?'<span style="color:var(--rouge);font-size:18px">⚠️</span>':'<span style="color:var(--vert);font-size:18px">✅</span>'}
         </div>
         ${epi?`<div style="padding-left:30px;display:flex;gap:8px;flex-wrap:wrap">
@@ -454,10 +493,10 @@ function renderAdmin(){
     ${(S.tousAgents||[]).map(a=>`
       <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--gris)">
         <div>
-          <div style="font-weight:700;font-size:13px">${a.prenom} ${a.nom} ${a.equipe?'<span style="font-size:11px;color:var(--texte-doux)">· '+a.equipe+'</span>':''}</div>
-          <div style="font-size:11px;color:var(--texte-doux)">Code : ${a.code_acces}</div>
+          <div style="font-weight:700;font-size:13px">${a.prenom} ${a.nom}</div>
+          <div style="font-size:11px;color:var(--texte-doux)">${a.equipe||'Admin'} ${a.email?'· '+a.email:''}</div>
         </div>
-        <button onclick="ouvrirEditAgent('${a.id}')" style="padding:6px 12px;background:var(--bleu-clair);color:var(--bleu);border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">✏️ Modifier</button>
+        <button onclick="ouvrirEditAgent('${a.id}')" style="padding:6px 12px;background:var(--bleu-clair);color:var(--bleu);border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">✏️</button>
       </div>`).join('')}
     <button class="btn-add" onclick="ouvrirAjoutAgent()" style="margin-top:10px">+ Ajouter un agent</button>
   </div>
@@ -508,7 +547,7 @@ function ouvrirEditAgent(id){
   render();
 }
 function ouvrirAjoutAgent(){
-  S.modalAgent = {mode:'add', nom:'', prenom:'', code_acces:'', equipe:''};
+  S.modalAgent = {mode:'add', nom:'', prenom:'', equipe:''};
   render();
 }
 function renderModalAgent(){
@@ -518,16 +557,17 @@ function renderModalAgent(){
       <div style="font-size:16px;font-weight:700;margin-bottom:16px">${a.mode==='add'?"Ajouter un agent":"Modifier l'agent"}</div>
       <div class="form-group"><label class="form-label">Prénom</label><input class="form-input" id="m-prenom" type="text" value="${a.prenom||''}" /></div>
       <div class="form-group"><label class="form-label">Nom</label><input class="form-input" id="m-nom" type="text" value="${a.nom||''}" /></div>
-      <div class="form-group"><label class="form-label">Code d'accès</label><input class="form-input" id="m-code" type="text" value="${a.code_acces||''}" /></div>
       <div class="form-group"><label class="form-label">Équipe</label>
         <select class="form-input" id="m-equipe">
           <option value="">-- Aucune (admin) --</option>
-          <option value="Matin" ${a.equipe==='Matin'?'selected':''}>Matin</option>
-          <option value="Soirée" ${a.equipe==='Soirée'?'selected':''}>Soirée</option>
+          <option value="Matin" ${a.equipe==='Matin'?'selected':''}>☀️ Matin</option>
+          <option value="Aprem" ${a.equipe==='Aprem'?'selected':''}>🌆 Aprem</option>
+          <option value="Soirée" ${a.equipe==='Soirée'?'selected':''}>🌙 Soirée</option>
         </select>
       </div>
       <div style="display:flex;gap:10px;margin-top:16px">
         <button class="btn-secondary" onclick="S.modalAgent=null;render()">Annuler</button>
+        ${a.mode==='edit'?`<button style="padding:11px 16px;background:var(--rouge-pale);color:var(--rouge);border:2px solid var(--rouge);border-radius:10px;font-size:14px;font-weight:700;cursor:pointer" onclick="supprimerAgent('${a.id}')">🗑️</button>`:''}
         <button class="btn-primary" style="flex:1" onclick="sauvegarderAgent()">✅ Enregistrer</button>
       </div>
     </div>
@@ -536,20 +576,31 @@ function renderModalAgent(){
 async function sauvegarderAgent(){
   const prenom = document.getElementById('m-prenom')?.value.trim();
   const nom = document.getElementById('m-nom')?.value.trim();
-  const code = document.getElementById('m-code')?.value.trim();
   const equipe = document.getElementById('m-equipe')?.value||null;
-  if(!prenom||!nom||!code) return toast('Remplis tous les champs','err');
+  if(!prenom||!nom) return toast('Remplis prénom et nom','err');
   try{
     if(S.modalAgent.mode==='add'){
-      await db.post('agents',{prenom,nom,code_acces:code,equipe:equipe||null,est_responsable:false});
+      await db.post('agents',{prenom,nom,code_acces:'',equipe:equipe||null,est_responsable:false});
     } else {
-      await db.patch('agents',`id=eq.${S.modalAgent.id}`,{prenom,nom,code_acces:code,equipe:equipe||null});
+      await db.patch('agents',`id=eq.${S.modalAgent.id}`,{prenom,nom,equipe:equipe||null});
     }
     toast('✅ Agent enregistré !','ok');
     S.modalAgent = null;
-    S.tousAgents = await db.get('agents','order=nom.asc');
+    S.tousAgents = await db.get('agents','select=id,prenom,nom,equipe,email,est_responsable&order=nom.asc');
+    await chargerAgentsPersonnel();
     render();
   }catch(e){ toast('Erreur','err'); }
+}
+async function supprimerAgent(id){
+  if(!confirm('Supprimer cet agent ?')) return;
+  try{
+    await db.del('agents',`id=eq.${id}`);
+    toast('✅ Agent supprimé','ok');
+    S.modalAgent = null;
+    S.tousAgents = await db.get('agents','select=id,prenom,nom,equipe,email,est_responsable&order=nom.asc');
+    await chargerAgentsPersonnel();
+    render();
+  }catch(e){ toast('Impossible de supprimer (données liées)','err'); }
 }
 
 function renderAdminEPI(){
@@ -644,8 +695,20 @@ async function changerDate(d){
 // ── CHARGEMENT ─────────────────────────────────────────────────
 async function chargerTout(){
   await getOrCreateVacation();
-  await Promise.all([chargerControles(), chargerColis(), chargerEPI()]);
-  if(S.agent.est_responsable) S.tousAgents = await db.get('agents','order=nom.asc');
+  await Promise.all([chargerControles(), chargerColis(), chargerEPI(), chargerAgentsPersonnel()]);
+  if(S.agent.est_responsable) S.tousAgents = await db.get('agents','select=id,prenom,nom,equipe,email,est_responsable&order=nom.asc');
+}
+
+async function chargerAgentsPersonnel(){
+  try{
+    const tous = await db.get('agents','select=id,prenom,nom,equipe&equipe=not.is.null&order=nom.asc');
+    PERSONNEL_DB = {};
+    tous.forEach(a=>{
+      const eq = a.equipe;
+      if(!PERSONNEL_DB[eq]) PERSONNEL_DB[eq] = [];
+      PERSONNEL_DB[eq].push(a);
+    });
+  }catch(e){ console.error('Erreur chargement agents',e); }
 }
 
 async function getOrCreateVacation(){
