@@ -111,7 +111,7 @@ let PERSONNEL_DB = {}; // { 'Matin': [{id,prenom,nom},...], 'Aprem': [...], 'Soi
 
 let S = {
   agent: null, vue: 'epi', loading: false,
-  vacationId: null, date: new Date().toISOString().split('T')[0],
+  vacationId: null, date: getToday(),
   controles: [], colisData: [], epiData: [], epiValide: false,
   epiEquipeSelectionnee: '',
   modeTest: false, sessionColis: 1,
@@ -146,7 +146,14 @@ function toast(msg, type='ok'){
 }
 function fmtDate(d){ return new Date(d).toLocaleDateString('fr-FR',{weekday:'long',day:'2-digit',month:'long',year:'numeric'}); }
 function fmtHeure(iso){ if(!iso) return '—'; const d=new Date(iso.endsWith('Z')?iso:iso+'Z'); return d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}); }
-function getToday(){ return new Date().toISOString().split('T')[0]; }
+function getToday(){
+  const now = new Date();
+  // Date locale (pas UTC) pour éviter le décalage horaire
+  const y = now.getFullYear();
+  const m = String(now.getMonth()+1).padStart(2,'0');
+  const d = String(now.getDate()).padStart(2,'0');
+  return `${y}-${m}-${d}`;
+}
 
 function calcMoyenneColis(session){
   // Moyenne globale (première → dernière saisie) pour une session
@@ -243,7 +250,7 @@ function renderLogin(){
       </div>
       <div class="form-group">
         <label class="form-label">Mot de passe</label>
-        <input class="form-input" id="login-code" type="password" placeholder="••••••" />
+        <input class="form-input" id="login-code" type="password" autocomplete="new-password" placeholder="••••••" />
       </div>
       <button class="btn-primary" onclick="connexion()">Se connecter</button>
       <div class="login-error" id="login-error">Prénom ou mot de passe incorrect</div>
@@ -645,8 +652,8 @@ async function connexion(){
 function renderChangerCode(){
   return `<div class="card">
     <div class="card-title">🔑 Changer mon mot de passe</div>
-    <div class="form-group"><label class="form-label">Nouveau mot de passe</label><input class="form-input" id="new-code" type="password" placeholder="Minimum 6 caractères" /></div>
-    <div class="form-group"><label class="form-label">Confirmer le mot de passe</label><input class="form-input" id="confirm-code" type="password" placeholder="Confirmer" /></div>
+    <div class="form-group"><label class="form-label">Nouveau mot de passe</label><input class="form-input" id="new-code" type="password" autocomplete="new-password" placeholder="Minimum 6 caractères" /></div>
+    <div class="form-group"><label class="form-label">Confirmer le mot de passe</label><input class="form-input" id="confirm-code" type="password" autocomplete="new-password" placeholder="Confirmer" /></div>
     <button class="btn-primary" onclick="changerCode()">✅ Enregistrer</button>
   </div>`;
 }
