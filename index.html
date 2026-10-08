@@ -359,14 +359,19 @@ function renderColis(){
   const equipe = S.agent.equipe || 'Soirée';
   const tranches = equipe==='Matin' ? TRANCHES_MATIN : TRANCHES_SOIREE;
   const moy = calcMoyenneColis();
-  const moyColor = moy ? (moy>=OBJECTIF_COLIS?'var(--vert)':'var(--rouge)') : 'var(--texte-doux)';
-  
+  // Si pas encore 2 relevés, afficher le dernier relevé connu
   const sessionActuelle = S.sessionColis||1;
+  const dataSession = S.colisData.filter(c=>(c.session_numero||1)===sessionActuelle&&c.quantite_colis);
+  const dernierReleve = dataSession.length===1 ? dataSession[0].quantite_colis : null;
+  const valAffichee = moy || dernierReleve;
+  const moyColor = valAffichee ? (valAffichee>=OBJECTIF_COLIS?'var(--vert)':'var(--rouge)') : 'var(--texte-doux)';
+  const labelMoy = moy ? `${moy} colis/h` : (dernierReleve ? `${dernierReleve} (1 relevé)` : '—');
+
   return `<div class="card">
     <div class="card-title">📦 Contrôle Colis/H — Objectif ${OBJECTIF_COLIS} colis/h</div>
     <div style="display:flex;gap:10px;margin-bottom:14px">
-      <div class="stat-box info" style="background:${moy&&moy>=OBJECTIF_COLIS?'var(--vert-pale)':moy?'var(--rouge-pale)':'var(--bleu-clair)'};border-color:${moyColor}">
-        <div class="stat-val" style="color:${moyColor}">${moy||'—'}</div>
+      <div class="stat-box info" style="background:${valAffichee&&valAffichee>=OBJECTIF_COLIS?'var(--vert-pale)':valAffichee?'var(--rouge-pale)':'var(--bleu-clair)'};border-color:${moyColor}">
+        <div class="stat-val" style="color:${moyColor};font-size:18px">${labelMoy}</div>
         <div class="stat-label" style="color:${moyColor}">Moyenne colis/h</div>
       </div>
       <div class="stat-box ok">
@@ -374,9 +379,11 @@ function renderColis(){
         <div class="stat-label" style="color:var(--vert)">Objectif</div>
       </div>
     </div>
-    <table class="table-suivi">
+    <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
+    <table class="table-suivi" style="min-width:500px">
       <thead><tr>
-        <th>Tranche</th><th>Camion + H</th><th>H relevé</th><th style="min-width:90px">Qté colis</th><th>Moy/h</th><th>Arrêt (min cumul)</th><th>Cadence</th>
+        <th style="position:sticky;left:0;background:white;z-index:2;min-width:50px">Quai</th>
+        <th>Camion + H</th><th>H relevé</th><th style="min-width:90px">Qté colis</th><th>Moy/h</th><th>Arrêt (min)</th><th>Cadence</th>
       </tr></thead>
       <tbody>
         ${(()=>{
@@ -387,12 +394,12 @@ function renderColis(){
             const moyTranche = idx>0 ? calcMoyenneTraanche(sorted,idx) : null;
             const moyColor = moyTranche ? (moyTranche>=OBJECTIF_COLIS?'var(--vert)':'var(--rouge)') : 'var(--texte-doux)';
             return `<tr>
-              <td style="font-weight:600;font-size:11px">${tranche}</td>
-              <td><input style="width:100%;border:none;background:transparent;font-size:11px;text-align:center" type="text" placeholder="—" value="${c.camion_h_debut||''}" onblur="sauvegarderColis('${tranche}','camion_h_debut',this.value)" /></td>
+              <td style="position:sticky;left:0;background:white;font-weight:700;font-size:12px;z-index:1"><input style="width:48px;border:1.5px solid var(--gris-bord);border-radius:6px;font-size:12px;font-weight:700;text-align:center;padding:4px 2px" type="text" placeholder="Q?" value="${c.quai||tranche}" onblur="sauvegarderColis('${tranche}','quai',this.value)" /></td>
+              <td><input style="width:80px;border:none;background:transparent;font-size:11px;text-align:center" type="text" placeholder="—" value="${c.camion_h_debut||''}" onblur="sauvegarderColis('${tranche}','camion_h_debut',this.value)" /></td>
               <td style="text-align:center"><input style="width:75px;border:1.5px solid var(--gris-bord);border-radius:6px;font-size:11px;text-align:center;padding:4px" type="time" value="${c.heure_controle||''}" onchange="sauvegarderColis('${tranche}','heure_controle',this.value)" /></td>
               <td><input style="width:90px;border:1.5px solid var(--gris-bord);border-radius:8px;background:white;font-size:15px;font-weight:700;text-align:center;padding:6px 4px" type="number" placeholder="—" value="${c.quantite_colis||''}" onblur="sauvegarderColis('${tranche}','quantite_colis',parseInt(this.value)||null)" /></td>
               <td style="font-weight:700;color:${moyColor};font-size:13px;text-align:center">${moyTranche||'—'}</td>
-              <td><input style="width:70px;border:1.5px solid var(--gris-bord);border-radius:8px;background:white;font-size:13px;text-align:center;padding:5px 4px" type="number" placeholder="0" value="${c.arret_machine_cumul||''}" onblur="sauvegarderColis('${tranche}','arret_machine_cumul',parseInt(this.value)||0)" /></td>
+              <td><input style="width:60px;border:1.5px solid var(--gris-bord);border-radius:8px;background:white;font-size:13px;text-align:center;padding:5px 2px" type="number" placeholder="0" value="${c.arret_machine_cumul||''}" onblur="sauvegarderColis('${tranche}','arret_machine_cumul',parseInt(this.value)||0)" /></td>
               <td data-tranche="${tranche}" style="font-weight:700;color:${c.quantite_colis?(c.quantite_colis>=OBJECTIF_COLIS?'var(--vert)':'var(--rouge)'):'var(--texte-doux)'}">
                 <span class="cadence-icone">${c.quantite_colis?(c.quantite_colis>=OBJECTIF_COLIS?'✅':'❌'):'—'}</span>
               </td>
@@ -402,6 +409,7 @@ function renderColis(){
         })()}
       </tbody>
     </table>
+    </div>
   </div>`;
 }
 
