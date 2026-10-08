@@ -358,14 +358,14 @@ function renderChantiers(){
 function renderColis(){
   const equipe = S.agent.equipe || 'Soirée';
   const tranches = equipe==='Matin' ? TRANCHES_MATIN : TRANCHES_SOIREE;
-  const moy = calcMoyenneColis();
-  // Si pas encore 2 relevés, afficher le dernier relevé connu
   const sessionActuelle = S.sessionColis||1;
   const dataSession = S.colisData.filter(c=>(c.session_numero||1)===sessionActuelle&&c.quantite_colis);
-  const dernierReleve = dataSession.length===1 ? dataSession[0].quantite_colis : null;
+  const moy = calcMoyenneColis();
+  // Si 1 seul relevé : afficher la valeur directement (pas de calcul de vitesse possible)
+  const dernierReleve = !moy && dataSession.length>=1 ? dataSession[dataSession.length-1].quantite_colis : null;
   const valAffichee = moy || dernierReleve;
   const moyColor = valAffichee ? (valAffichee>=OBJECTIF_COLIS?'var(--vert)':'var(--rouge)') : 'var(--texte-doux)';
-  const labelMoy = moy ? `${moy} colis/h` : (dernierReleve ? `${dernierReleve} (1 relevé)` : '—');
+  const labelMoy = moy ? `${moy} colis/h` : (dernierReleve ? `${dernierReleve} colis (1 relevé)` : '—');
 
   return `<div class="card">
     <div class="card-title">📦 Contrôle Colis/H — Objectif ${OBJECTIF_COLIS} colis/h</div>
