@@ -155,10 +155,9 @@ function getToday(){
   return `${y}-${m}-${d}`;
 }
 
-function calcMoyenneColis(session){
-  // Moyenne globale (première → dernière saisie) pour une session
-  const sess = session || S.sessionColis || 1;
-  const data = S.colisData.filter(c=>c.quantite_colis&&c.heure_controle&&(c.session_numero||1)===sess);
+function calcMoyenneSession(sessNum){
+  // Moyenne globale pour une session (1er → dernier relevé avec heure + quantité)
+  const data = S.colisData.filter(c=>c.quantite_colis&&c.heure_controle&&(c.session_numero||1)===sessNum);
   if(data.length < 2) return null;
   const sorted = [...data].sort((a,b)=>a.heure_controle.localeCompare(b.heure_controle));
   const first = sorted[0], last = sorted[sorted.length-1];
@@ -166,7 +165,6 @@ function calcMoyenneColis(session){
   const [lh,lm] = last.heure_controle.split(':').map(Number);
   let dureeMin = (lh*60+lm)-(fh*60+fm);
   if(dureeMin<=0) dureeMin+=24*60;
-  // Déduire les arrêts machine cumulés totaux
   const totalArret = last.arret_machine_cumul||0;
   const dureeEffective = Math.max(1, dureeMin - totalArret);
   const totalColis = last.quantite_colis - first.quantite_colis;
@@ -174,18 +172,25 @@ function calcMoyenneColis(session){
   return Math.round((totalColis/dureeEffective)*60);
 }
 
-function calcMoyenneTraanche(sorted, index){
-  // Moyenne entre avant-dernière et dernière saisie
+function calcMoyenneColis(){
+  // Moyenne globale toutes sessions confondues
+  const sessions = [...new Set(S.colisData.map(c=>c.session_numero||1))];
+  const moyennes = sessions.map(s=>calcMoyenneSession(s)).filter(m=>m!==null);
+  if(!moyennes.length) return null;
+  return Math.round(moyennes.reduce((a,b)=>a+b,0)/moyennes.length);
+}
+
+function calcMoyenneLigne(sorted, index){
+  // Vitesse entre la ligne précédente et la ligne actuelle
   if(index < 1) return null;
   const prev = sorted[index-1];
   const curr = sorted[index];
-  if(!prev.quantite_colis || !curr.quantite_colis) return null;
+  if(!prev.quantite_colis || !curr.quantite_colis || !prev.heure_controle || !curr.heure_controle) return null;
   const [ph,pm] = prev.heure_controle.split(':').map(Number);
   const [ch,cm] = curr.heure_controle.split(':').map(Number);
   let dureeMin = (ch*60+cm)-(ph*60+pm);
   if(dureeMin<=0) dureeMin+=24*60;
   if(dureeMin===0) return null;
-  // Déduire uniquement les nouveaux arrêts de cette tranche
   const arretPrev = prev.arret_machine_cumul||0;
   const arretCurr = curr.arret_machine_cumul||0;
   const arretTranche = Math.max(0, arretCurr - arretPrev);
@@ -356,61 +361,88 @@ function renderChantiers(){
 
 // ── COLIS/H ────────────────────────────────────────────────────
 function renderColis(){
-  const equipe = S.agent.equipe || 'Soirée';
-  const tranches = equipe==='Matin' ? TRANCHES_MATIN : TRANCHES_SOIREE;
-  const sessionActuelle = S.sessionColis||1;
-  const dataSession = S.colisData.filter(c=>(c.session_numero||1)===sessionActuelle&&c.quantite_colis);
-  const moy = calcMoyenneColis();
-  // Si 1 seul relevé : afficher la valeur directement (pas de calcul de vitesse possible)
-  const dernierReleve = !moy && dataSession.length>=1 ? dataSession[dataSession.length-1].quantite_colis : null;
-  const valAffichee = moy || dernierReleve;
-  const moyColor = valAffichee ? (valAffichee>=OBJECTIF_COLIS?'var(--vert)':'var(--rouge)') : 'var(--texte-doux)';
-  const labelMoy = moy ? `${moy} colis/h` : (dernierReleve ? `${dernierReleve} colis (1 relevé)` : '—');
+  const moyGlobale = calcMoyenneColis();
+  const moyColor = moyGlobale ? (moyGlobale>=OBJECTIF_COLIS?'var(--vert)':'var(--rouge)') : 'var(--texte-doux)';
+  const moyBg = moyGlobale ? (moyGlobale>=OBJECTIF_COLIS?'var(--vert-pale)':'var(--rouge-pale)') : 'var(--bleu-clair)';
+  const labelGlobal = moyGlobale ? `${moyGlobale} colis/h` : '—';
+
+  // Sessions existantes (au moins 1 entrée en DB) + session courante
+  const sessionsExistantes = [...new Set(S.colisData.map(c=>c.session_numero||1))].sort((a,b)=>a-b);
+  const maxSess = sessionsExistantes.length ? Math.max(...sessionsExistantes) : 0;
+  const sessionCourante = S.sessionColisActive || maxSess || 1;
+  const toutesLessions = sessionsExistantes.includes(sessionCourante) ? sessionsExistantes : [...sessionsExistantes, sessionCourante].sort((a,b)=>a-b);
+
+  function renderSession(sessNum){
+    const lignes = [];
+    for(let i=1;i<=5;i++){
+      const c = S.colisData.find(x=>(x.session_numero||1)===sessNum&&(x.ligne_numero||1)===i)||{};
+      lignes.push({i, c});
+    }
+    const sorted = lignes.filter(({c})=>c.quantite_colis&&c.heure_controle).map(({c})=>c).sort((a,b)=>a.heure_controle.localeCompare(b.heure_controle));
+    const moyS = calcMoyenneSession(sessNum);
+    const mSColor = moyS ? (moyS>=OBJECTIF_COLIS?'var(--vert)':'var(--rouge)') : 'var(--texte-doux)';
+    const mSBg = moyS ? (moyS>=OBJECTIF_COLIS?'var(--vert-pale)':'var(--rouge-pale)') : 'var(--gris)';
+
+    return `<div style="margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div style="font-weight:700;font-size:13px;color:var(--bleu)">📋 Session ${sessNum}</div>
+        <div style="font-size:12px;font-weight:700;padding:4px 10px;border-radius:20px;background:${mSBg};color:${mSColor}">${moyS?`${moyS} colis/h`:'En attente'}</div>
+      </div>
+      <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
+      <table class="table-suivi" style="min-width:480px;margin-bottom:0">
+        <thead><tr>
+          <th style="min-width:30px;text-align:center">#</th>
+          <th style="position:sticky;left:0;background:white;z-index:2;min-width:50px">Quai</th>
+          <th>Camion+H</th><th>H relevé</th><th>Qté colis</th><th>Colis/h</th><th>Arrêt(min)</th>
+        </tr></thead>
+        <tbody>
+          ${lignes.map(({i,c})=>{
+            const idx = sorted.findIndex(x=>x===c||(x.id&&x.id===c.id));
+            const moyL = idx>0 ? calcMoyenneLigne(sorted,idx) : null;
+            const mLColor = moyL ? (moyL>=OBJECTIF_COLIS?'var(--vert)':'var(--rouge)') : 'var(--texte-doux)';
+            return `<tr style="${c.quantite_colis&&c.quantite_colis<OBJECTIF_COLIS?'background:var(--rouge-pale)':''}">
+              <td style="text-align:center;font-size:11px;color:var(--texte-doux);font-weight:700">${i}</td>
+              <td style="position:sticky;left:0;background:${c.quantite_colis&&c.quantite_colis<OBJECTIF_COLIS?'#fee2e2':'white'};z-index:1">
+                <input style="width:48px;border:1.5px solid var(--gris-bord);border-radius:6px;font-size:12px;font-weight:700;text-align:center;padding:4px 2px" type="text" placeholder="Q?" value="${c.quai||''}" onblur="sauvegarderColisLigne(${sessNum},${i},'quai',this.value)" />
+              </td>
+              <td><input style="width:76px;border:none;background:transparent;font-size:11px;text-align:center" type="text" placeholder="—" value="${c.camion_h_debut||''}" onblur="sauvegarderColisLigne(${sessNum},${i},'camion_h_debut',this.value)" /></td>
+              <td><input style="width:72px;border:1.5px solid var(--gris-bord);border-radius:6px;font-size:11px;text-align:center;padding:4px" type="time" value="${c.heure_controle||''}" onchange="sauvegarderColisLigne(${sessNum},${i},'heure_controle',this.value)" /></td>
+              <td><input style="width:80px;border:1.5px solid var(--gris-bord);border-radius:8px;background:white;font-size:14px;font-weight:700;text-align:center;padding:5px 3px" type="number" placeholder="—" value="${c.quantite_colis||''}" onblur="sauvegarderColisLigne(${sessNum},${i},'quantite_colis',parseInt(this.value)||null)" /></td>
+              <td style="font-weight:700;color:${mLColor};font-size:12px;text-align:center;white-space:nowrap">${moyL?`${moyL}`:'—'}</td>
+              <td><input style="width:55px;border:1.5px solid var(--gris-bord);border-radius:8px;background:white;font-size:12px;text-align:center;padding:4px 2px" type="number" placeholder="0" value="${c.arret_machine_cumul||''}" onblur="sauvegarderColisLigne(${sessNum},${i},'arret_machine_cumul',parseInt(this.value)||0)" /></td>
+            </tr>
+            ${(c.quantite_colis&&c.quantite_colis<OBJECTIF_COLIS)?`<tr style="background:var(--orange-pale)"><td colspan="7" style="padding:2px 4px"><input style="width:100%;border:none;background:transparent;font-size:11px;padding:3px" type="text" placeholder="Raison sous-objectif..." value="${c.raison_non_atteinte||''}" onblur="sauvegarderColisLigne(${sessNum},${i},'raison_non_atteinte',this.value)" /></td></tr>`:''}`;
+          }).join('')}
+        </tbody>
+      </table>
+      </div>
+    </div>`;
+  }
+
+  const maxSession = toutesLessions.length ? Math.max(...toutesLessions) : 0;
 
   return `<div class="card">
     <div class="card-title">📦 Contrôle Colis/H — Objectif ${OBJECTIF_COLIS} colis/h</div>
-    <div style="display:flex;gap:10px;margin-bottom:14px">
-      <div class="stat-box info" style="background:${valAffichee&&valAffichee>=OBJECTIF_COLIS?'var(--vert-pale)':valAffichee?'var(--rouge-pale)':'var(--bleu-clair)'};border-color:${moyColor}">
-        <div class="stat-val" style="color:${moyColor};font-size:18px">${labelMoy}</div>
-        <div class="stat-label" style="color:${moyColor}">Moyenne colis/h</div>
+    <div style="display:flex;gap:10px;margin-bottom:16px">
+      <div class="stat-box info" style="background:${moyBg};border-color:${moyColor}">
+        <div class="stat-val" style="color:${moyColor};font-size:18px">${labelGlobal}</div>
+        <div class="stat-label" style="color:${moyColor}">Moyenne globale</div>
       </div>
       <div class="stat-box ok">
         <div class="stat-val" style="color:var(--vert)">${OBJECTIF_COLIS}</div>
         <div class="stat-label" style="color:var(--vert)">Objectif</div>
       </div>
     </div>
-    <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
-    <table class="table-suivi" style="min-width:500px">
-      <thead><tr>
-        <th style="position:sticky;left:0;background:white;z-index:2;min-width:50px">Quai</th>
-        <th>Camion + H</th><th>H relevé</th><th style="min-width:90px">Qté colis</th><th>Moy/h</th><th>Arrêt (min)</th><th>Cadence</th>
-      </tr></thead>
-      <tbody>
-        ${(()=>{
-          const sorted = [...S.colisData].filter(c=>c.quantite_colis&&c.heure_controle&&(c.session_numero||1)===sessionActuelle).sort((a,b)=>a.heure_controle.localeCompare(b.heure_controle));
-          return tranches.map(tranche=>{
-            const c = S.colisData.find(x=>x.tranche===tranche&&(x.session_numero||1)===sessionActuelle)||{};
-            const idx = sorted.findIndex(x=>x.tranche===tranche);
-            const moyTranche = idx>0 ? calcMoyenneTraanche(sorted,idx) : null;
-            const moyColor = moyTranche ? (moyTranche>=OBJECTIF_COLIS?'var(--vert)':'var(--rouge)') : 'var(--texte-doux)';
-            return `<tr>
-              <td style="position:sticky;left:0;background:white;font-weight:700;font-size:12px;z-index:1"><input style="width:48px;border:1.5px solid var(--gris-bord);border-radius:6px;font-size:12px;font-weight:700;text-align:center;padding:4px 2px" type="text" placeholder="Q?" value="${c.quai||''}" onblur="sauvegarderColis('${tranche}','quai',this.value)" /></td>
-              <td><input style="width:80px;border:none;background:transparent;font-size:11px;text-align:center" type="text" placeholder="—" value="${c.camion_h_debut||''}" onblur="sauvegarderColis('${tranche}','camion_h_debut',this.value)" /></td>
-              <td style="text-align:center"><input style="width:75px;border:1.5px solid var(--gris-bord);border-radius:6px;font-size:11px;text-align:center;padding:4px" type="time" value="${c.heure_controle||''}" onchange="sauvegarderColis('${tranche}','heure_controle',this.value)" /></td>
-              <td><input style="width:90px;border:1.5px solid var(--gris-bord);border-radius:8px;background:white;font-size:15px;font-weight:700;text-align:center;padding:6px 4px" type="number" placeholder="—" value="${c.quantite_colis||''}" onblur="sauvegarderColis('${tranche}','quantite_colis',parseInt(this.value)||null)" /></td>
-              <td style="font-weight:700;color:${moyColor};font-size:13px;text-align:center">${moyTranche||'—'}</td>
-              <td><input style="width:60px;border:1.5px solid var(--gris-bord);border-radius:8px;background:white;font-size:13px;text-align:center;padding:5px 2px" type="number" placeholder="0" value="${c.arret_machine_cumul||''}" onblur="sauvegarderColis('${tranche}','arret_machine_cumul',parseInt(this.value)||0)" /></td>
-              <td data-tranche="${tranche}" style="font-weight:700;color:${c.quantite_colis?(c.quantite_colis>=OBJECTIF_COLIS?'var(--vert)':'var(--rouge)'):'var(--texte-doux)'}">
-                <span class="cadence-icone">${c.quantite_colis?(c.quantite_colis>=OBJECTIF_COLIS?'✅':'❌'):'—'}</span>
-              </td>
-            </tr>
-            ${(c.quantite_colis&&c.quantite_colis<OBJECTIF_COLIS)?`<tr style="background:var(--orange-pale)"><td colspan="7"><input style="width:100%;border:none;background:transparent;font-size:11px;padding:4px" type="text" placeholder="Raison..." value="${c.raison_non_atteinte||''}" onblur="sauvegarderColis('${tranche}','raison_non_atteinte',this.value)" /></td></tr>`:''}`;
-          }).join('');
-        })()}
-      </tbody>
-    </table>
-    </div>
+    ${toutesLessions.map(s=>renderSession(s)).join('<hr style="border:none;border-top:2px dashed var(--gris-bord);margin:4px 0 16px">')}
+    <button class="btn-add" style="width:100%;margin-top:4px" onclick="ajouterSessionColis()">＋ Nouvelle session</button>
   </div>`;
+}
+
+function ajouterSessionColis(){
+  const sessions = [...new Set(S.colisData.map(c=>c.session_numero||1))];
+  const max = sessions.length ? Math.max(...sessions) : 0;
+  S.sessionColisActive = max + 1;
+  render();
 }
 
 // ── EPI ────────────────────────────────────────────────────────
@@ -682,7 +714,7 @@ async function changerCode(){
 async function deconnexion(){
   arreterRappelColis();
   await supabaseAuth.auth.signOut();
-  S = {agent:null, vue:'epi', loading:false, vacationId:null, date:getToday(), controles:[], colisData:[], epiData:[], epiValide:false, tournees:[], toutesVacations:[], adminVue:'liste', modalAgent:null, tousAgents:[], authSession:null};
+  S = {agent:null, vue:'epi', loading:false, vacationId:null, date:getToday(), controles:[], colisData:[], epiData:[], epiValide:false, tournees:[], toutesVacations:[], adminVue:'liste', modalAgent:null, tousAgents:[], authSession:null, sessionColisActive:null};
   render();
 }
 
@@ -794,17 +826,16 @@ async function sauvegarderTournee(numControle, numTournee, champ, valeur){
 }
 
 // ── SAUVEGARDE COLIS ────────────────────────────────────────────
-async function sauvegarderColis(tranche, champ, valeur){
+async function sauvegarderColisLigne(sessNum, ligneNum, champ, valeur){
   try{
     if(!S.vacationId){ toast('Session non initialisée','err'); return; }
-    const sessionNum = S.sessionColis||1;
-    let c = S.colisData.find(x=>x.tranche===tranche&&(x.session_numero||1)===sessionNum);
+    let c = S.colisData.find(x=>(x.session_numero||1)===sessNum&&(x.ligne_numero||1)===ligneNum);
     const now = new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
     const autoHeure = (champ==='quantite_colis' && valeur && (!c||!c.heure_controle)) ? now : null;
     const autoCadence = (champ==='quantite_colis' && valeur!=null) ? (valeur>=OBJECTIF_COLIS) : null;
 
     if(!c){
-      const body = {vacation_id:S.vacationId, tranche, session_numero:sessionNum, [champ]:valeur};
+      const body = {vacation_id:S.vacationId, session_numero:sessNum, ligne_numero:ligneNum, [champ]:valeur};
       if(autoHeure) body.heure_controle = autoHeure;
       if(autoCadence!==null) body.cadence_ok = autoCadence;
       const created = await db.post('controles_colis', body);
@@ -817,18 +848,6 @@ async function sauvegarderColis(tranche, champ, valeur){
       c[champ] = valeur;
       if(autoHeure) c.heure_controle = autoHeure;
       if(autoCadence!==null) c.cadence_ok = autoCadence;
-    }
-    // Re-render uniquement pour mettre à jour l'indicateur cadence (✅/❌), sans perturber le focus
-    if(champ==='quantite_colis'){
-      // Mise à jour visuelle légère sans re-render complet
-      const row = document.querySelector(`[data-tranche="${tranche}"]`);
-      if(row){
-        const val = parseInt(valeur)||0;
-        const icone = row.querySelector('.cadence-icone');
-        if(icone) icone.textContent = val>=OBJECTIF_COLIS?'✅':'❌';
-        const couleur = val>=OBJECTIF_COLIS?'var(--vert)':'var(--rouge)';
-        if(icone) icone.style.color = couleur;
-      }
     }
   }catch(e){ toast('Erreur sauvegarde','err'); }
 }
