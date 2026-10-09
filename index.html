@@ -573,6 +573,14 @@ function renderAdmin(){
   <div class="card">
     <div class="card-title">🦺 EPI du jour</div>
     ${renderAdminEPI()}
+  </div>
+  <div class="card">
+    <div class="card-title">📁 Archives — Vacations terminées</div>
+    <div class="form-group">
+      <label class="form-label">Date à consulter</label>
+      <input class="form-input" type="date" value="${S.archiveDate||getToday()}" onchange="chargerArchives(this.value)" />
+    </div>
+    <div id="archives-content">${S.archivesData ? renderArchives() : '<div class="empty-state" style="padding:16px;color:var(--texte-doux)">Sélectionne une date pour voir les archives.</div>'}</div>
   </div>`;
 }
 
@@ -664,6 +672,133 @@ async function supprimerAgent(id){
   }catch(e){ toast('Impossible de supprimer (données liées)','err'); }
 }
 
+async function chargerArchives(date){
+  S.archiveDate = date;
+  // Charger toutes les vacations terminées de cette date
+  const vacs = await db.get('vacations_suivi',`date=eq.${date}&terminee=eq.true&select=*&order=created_at.asc`);
+  if(!vacs.length){ S.archivesData = []; render(); return; }
+
+  // Pour chaque vacation, charger contrôles, colis, EPI
+  const details = await Promise.all(vacs.map(async v=>{
+    const agent = (S.tousAgents||[]).find(a=>a.id===v.agent_id)||{prenom:'?',nom:'',equipe:''};
+    const controles = await db.get('controles_chantiers',`vacation_id=eq.${v.id}&order=numero.asc`);
+    const colis = await db.get('controles_colis',`vacation_id=eq.${v.id}&order=created_at.asc`);
+    const epi = await db.get('epi',`vacation_id=eq.${v.id}`);
+    // Charger les tournées
+    const ids = controles.map(c=>c.id);
+    const tournees = ids.length ? await db.get('tournees',`controle_id=in.(${ids.join(',')})&order=numero.asc`) : [];
+    return {vacation:v, agent, controles, colis, epi, tournees};
+  }));
+  S.archivesData = details;
+  render();
+}
+
+function calcMoyenneColisArchive(colisData){
+  const sessions = [...new Set(colisData.map(c=>c.session_numero||1))];
+  const moyennes = sessions.map(sessNum=>{
+    const data = colisData.filter(c=>c.quantite_colis&&c.heure_controle&&(c.session_numero||1)===sessNum);
+    if(data.length<1) return null;
+    const sorted = [...data].sort((a,b)=>a.heure_controle.localeCompare(b.heure_controle));
+    const first = sorted[0], last = sorted[sorted.length-1];
+    const [fh,fm] = first.heure_controle.split(':').map(Number);
+    const [lh,lm] = last.heure_controle.split(':').map(Number);
+    let duree = (lh*60+lm)-(fh*60+fm);
+    if(duree<=0) duree+=24*60;
+    const arret = last.arret_machine_cumul||0;
+    const dureeEff = Math.max(1,duree-arret);
+    const totalColis = last.quantite_colis - (data.length>1?first.quantite_colis:0);
+    if(totalColis<=0) return Math.round((last.quantite_colis/dureeEff)*60);
+    return Math.round((totalColis/dureeEff)*60);
+  }).filter(m=>m!==null);
+  if(!moyennes.length) return null;
+  return Math.round(moyennes.reduce((a,b)=>a+b,0)/moyennes.length);
+}
+
+function renderArchives(){
+  if(!S.archivesData||!S.archivesData.length){
+    return `<div class="empty-state" style="padding:16px;color:var(--texte-doux)">Aucune vacation terminée pour cette date.</div>`;
+  }
+  return S.archivesData.map((d,i)=>{
+    const moy = calcMoyenneColisArchive(d.colis);
+    const epiOk = !d.epi.filter(e=>e.nom_prenom!=='RAS').length;
+    return `<div style="background:var(--gris);border-radius:10px;padding:12px;margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div>
+          <div style="font-weight:700;font-size:14px">${d.agent.prenom} ${d.agent.nom}</div>
+          <div style="font-size:11px;color:var(--texte-doux)">${d.agent.equipe||'—'}</div>
+        </div>
+        <button onclick="exporterPDFArchive(${i})" style="padding:7px 12px;background:var(--bleu);color:white;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">🖨️ PDF</button>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;font-size:11px">
+        <span style="padding:3px 8px;border-radius:6px;background:white;border:1px solid var(--gris-bord)">📋 ${d.controles.length}/3 contrôles</span>
+        <span style="padding:3px 8px;border-radius:6px;background:${moy&&moy>=OBJECTIF_COLIS?'var(--vert-pale)':'var(--rouge-pale)'};color:${moy&&moy>=OBJECTIF_COLIS?'var(--vert)':'var(--rouge)'};font-weight:700">📦 ${moy||'—'} colis/h</span>
+        <span style="padding:3px 8px;border-radius:6px;background:${epiOk?'var(--vert-pale)':'var(--orange-pale)'};color:${epiOk?'var(--vert)':'var(--orange)'};font-weight:700">${epiOk?'✅ EPI OK':'⚠️ EPI NOK'}</span>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function exporterPDFArchive(index){
+  const d = S.archivesData[index];
+  if(!d) return;
+  const moy = calcMoyenneColisArchive(d.colis);
+  const contenu = `
+  <div style="font-family:Arial,sans-serif;padding:20px;max-width:800px;margin:0 auto;font-size:12px">
+  <h1 style="color:#1a56a0;border-bottom:3px solid #1a56a0;padding-bottom:8px;font-size:18px">📓 Cahier de Vacation — La Poste Mulhouse</h1>
+  <p><strong>Date :</strong> ${fmtDate(d.vacation.date)} | <strong>Équipe :</strong> ${d.agent.equipe||'—'} | <strong>Agent :</strong> ${d.agent.prenom} ${d.agent.nom}</p>
+
+  <h2 style="color:#1a56a0;font-size:14px;margin:16px 0 8px;border-left:4px solid #1a56a0;padding-left:8px">📋 Vérification des Chantiers</h2>
+  ${d.controles.length?d.controles.map(c=>{
+    const tournees = (d.tournees||[]).filter(t=>t.controle_id===c.id);
+    return `<div style="background:#f4f6f9;padding:10px;border-radius:6px;margin-bottom:10px">
+      <strong>Contrôle N°${c.numero}</strong> — Brin: ${c.brin||'—'} — Heure: ${c.heure_controle||'—'} — Agents: ${c.noms_chantier||'—'}
+      ${tournees.length?`<table style="width:100%;border-collapse:collapse;margin-top:8px">
+        <tr style="background:#1a56a0;color:white"><th style="padding:6px">N°</th><th style="padding:6px">Contenant</th><th style="padding:6px">Résultat</th><th style="padding:6px">Erreurs</th><th style="padding:6px">Solutions</th></tr>
+        ${tournees.map(t=>`<tr style="border-bottom:1px solid #eee"><td style="padding:6px">${t.numero}</td><td style="padding:6px">${t.contenant||'—'}</td><td style="padding:6px;color:${t.resultat==='OK'?'#16a34a':'#dc2626'};font-weight:bold">${t.resultat||'—'}</td><td style="padding:6px">${t.erreurs||'—'}</td><td style="padding:6px">${t.solutions||'—'}</td></tr>`).join('')}
+      </table>`:''}
+    </div>`;
+  }).join(''):'<p>Aucun contrôle saisi.</p>'}
+
+  <h2 style="color:#1a56a0;font-size:14px;margin:16px 0 8px;border-left:4px solid #1a56a0;padding-left:8px">📦 Contrôle Colis/H — Objectif ${OBJECTIF_COLIS} colis/h</h2>
+  <p style="display:inline-block;padding:6px 12px;border-radius:6px;font-weight:bold;background:${moy&&moy>=OBJECTIF_COLIS?'#dcfce7':'#fee2e2'};color:${moy&&moy>=OBJECTIF_COLIS?'#16a34a':'#dc2626'}">Moyenne : ${moy||'—'} colis/h ${moy?(moy>=OBJECTIF_COLIS?'✅ Objectif atteint':'❌ Sous objectif'):''}</p>
+  ${d.colis.filter(c=>c.quantite_colis).length?`<table style="width:100%;border-collapse:collapse;margin-bottom:14px">
+    <tr style="background:#1a56a0;color:white"><th style="padding:6px">Session</th><th style="padding:6px">Quai</th><th style="padding:6px">H contrôle</th><th style="padding:6px">Quantité</th><th style="padding:6px">Cadence</th></tr>
+    ${d.colis.filter(c=>c.quantite_colis).map(c=>`<tr style="border-bottom:1px solid #eee">
+      <td style="padding:6px">S${c.session_numero||1}-L${c.ligne_numero||1}</td>
+      <td style="padding:6px">${c.quai||'—'}</td>
+      <td style="padding:6px">${c.heure_controle||'—'}</td>
+      <td style="padding:6px;font-weight:bold">${c.quantite_colis}</td>
+      <td style="padding:6px;color:${c.cadence_ok!==false?'#16a34a':'#dc2626'};font-weight:bold">${c.cadence_ok!==false?'✅ OK':'❌ NOK'}</td>
+    </tr>`).join('')}
+  </table>`:'<p>Aucune donnée colis saisie.</p>'}
+
+  <h2 style="color:#1a56a0;font-size:14px;margin:16px 0 8px;border-left:4px solid #1a56a0;padding-left:8px">🦺 Contrôle EPI</h2>
+  ${d.epi.filter(e=>e.nom_prenom!=='RAS').length?`<table style="width:100%;border-collapse:collapse">
+    <tr style="background:#1a56a0;color:white"><th style="padding:6px">Nom + Prénom</th><th style="padding:6px">EPI manquant</th><th style="padding:6px">Solution apportée</th></tr>
+    ${d.epi.filter(e=>e.nom_prenom!=='RAS').map(e=>`<tr style="border-bottom:1px solid #eee"><td style="padding:6px">${e.nom_prenom}</td><td style="padding:6px;color:#dc2626;font-weight:bold">${e.epi_manquant}</td><td style="padding:6px">${e.solution||'—'}</td></tr>`).join('')}
+  </table>`:'<p style="color:#16a34a;font-weight:bold">✅ Aucun manquement EPI ce jour.</p>'}
+  </div>`;
+
+  const overlay = document.createElement('div');
+  overlay.id = 'pdf-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:white;z-index:999;overflow-y:auto;padding:0';
+  overlay.innerHTML = `
+    <div style="position:sticky;top:0;background:#1a56a0;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;z-index:10">
+      <span style="color:white;font-weight:700;font-size:15px">📄 Archive — ${d.agent.prenom} ${d.agent.nom}</span>
+      <div style="display:flex;gap:8px">
+        <button onclick="window.print()" style="padding:8px 16px;background:white;color:#1a56a0;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">🖨️ Imprimer</button>
+        <button onclick="fermerPDF()" style="padding:8px 14px;background:rgba(255,255,255,0.2);color:white;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">✕ Fermer</button>
+      </div>
+    </div>
+    <div id="pdf-content">${contenu}</div>
+  `;
+  document.body.appendChild(overlay);
+  const style = document.createElement('style');
+  style.id = 'print-style';
+  style.textContent = `@media print { body > *:not(#pdf-overlay) { display:none !important; } #pdf-overlay > div:first-child { display:none !important; } #pdf-overlay { position:static !important; } }`;
+  document.head.appendChild(style);
+}
+
 function renderAdminEPI(){
   if(!S.epiData.length) return `<div style="color:var(--vert);font-weight:600">✅ Aucun manquement EPI</div>`;
   return S.epiData.map(e=>`<div style="background:var(--orange-pale);border-radius:8px;padding:8px;margin-bottom:6px">
@@ -724,7 +859,7 @@ async function changerCode(){
 async function deconnexion(){
   arreterRappelColis();
   await supabaseAuth.auth.signOut();
-  S = {agent:null, vue:'epi', loading:false, vacationId:null, date:getToday(), controles:[], colisData:[], epiData:[], epiValide:false, tournees:[], toutesVacations:[], adminVue:'liste', modalAgent:null, tousAgents:[], authSession:null, sessionColisActive:null};
+  S = {agent:null, vue:'epi', loading:false, vacationId:null, date:getToday(), controles:[], colisData:[], epiData:[], epiValide:false, tournees:[], toutesVacations:[], adminVue:'liste', modalAgent:null, tousAgents:[], authSession:null, sessionColisActive:null, archiveDate:null, archivesData:null};
   render();
 }
 
