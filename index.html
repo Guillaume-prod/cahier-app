@@ -776,14 +776,20 @@ async function chargerAgentsPersonnel(){
 
 async function getOrCreateVacation(){
   const equipe = S.agent.equipe || 'Toutes';
-  let vacs = await db.get('vacations_suivi',`agent_id=eq.${S.agent.id}&date=eq.${S.date}&select=*`);
-  // Filtrer les vacations non terminées
+  // Chercher sur les 2 derniers jours pour gérer le passage minuit (équipe d'aprem)
+  const hier = new Date(Date.now() - 36*60*60*1000);
+  const hierStr = `${hier.getFullYear()}-${String(hier.getMonth()+1).padStart(2,'0')}-${String(hier.getDate()).padStart(2,'0')}`;
+  let vacs = await db.get('vacations_suivi',`agent_id=eq.${S.agent.id}&date=gte.${hierStr}&order=created_at.desc&select=*`);
+  // Prendre la vacation active la plus récente (non terminée)
   const vacActive = vacs.find(v=>!v.terminee);
   if(!vacActive){
     const created = await db.post('vacations_suivi',{agent_id:S.agent.id, equipe, date:S.date});
     S.vacationId = created[0].id;
+    // S.date reste aujourd'hui
   } else {
     S.vacationId = vacActive.id;
+    // Utiliser la date de la vacation trouvée (important après minuit)
+    S.date = vacActive.date;
   }
 }
 
@@ -997,6 +1003,16 @@ function exporterPDF(){
     <div id="pdf-content">${contenu}</div>
   `;
   document.body.appendChild(overlay);
+
+  // Clôturer automatiquement la vacation à la génération du PDF
+  if(S.vacationId){
+    arreterRappelColis();
+    db.patch('vacations_suivi',`id=eq.${S.vacationId}`,{terminee:true}).then(()=>{
+      const oldId = S.vacationId;
+      S.vacationId = null;
+      console.log('Vacation clôturée après export PDF', oldId);
+    }).catch(e=>console.error('Erreur clôture vacation PDF',e));
+  }
 
   // Style print pour masquer l'overlay chrome et imprimer uniquement le contenu
   const style = document.createElement('style');
