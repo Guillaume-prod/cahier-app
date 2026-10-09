@@ -721,6 +721,8 @@ async function deconnexion(){
 async function finVacation(){
   if(!confirm('Terminer cette vacation ?')) return;
   arreterRappelColis();
+  // Marquer la vacation comme terminée en base
+  try{ if(S.vacationId) await db.patch('vacations_suivi',`id=eq.${S.vacationId}`,{terminee:true}); }catch(e){}
   S.vacationId = null;
   S.epiValide = false;
   S.controles = [];
@@ -765,11 +767,13 @@ async function chargerAgentsPersonnel(){
 async function getOrCreateVacation(){
   const equipe = S.agent.equipe || 'Toutes';
   let vacs = await db.get('vacations_suivi',`agent_id=eq.${S.agent.id}&date=eq.${S.date}&select=*`);
-  if(!vacs.length){
+  // Filtrer les vacations non terminées
+  const vacActive = vacs.find(v=>!v.terminee);
+  if(!vacActive){
     const created = await db.post('vacations_suivi',{agent_id:S.agent.id, equipe, date:S.date});
     S.vacationId = created[0].id;
   } else {
-    S.vacationId = vacs[0].id;
+    S.vacationId = vacActive.id;
   }
 }
 
