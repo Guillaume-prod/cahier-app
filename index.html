@@ -400,14 +400,24 @@ function renderColis(){
             const idx = c.id ? sorted.findIndex(x=>x.id===c.id) : -1;
             const moyL = idx>0 ? calcMoyenneLigne(sorted,idx) : null;
             const mLColor = moyL ? (moyL>=OBJECTIF_COLIS?'var(--vert)':'var(--rouge)') : 'var(--texte-doux)';
+            const isAdmin = S.agent && S.agent.est_responsable;
+            const heureLocked = !isAdmin && !!c.heure_controle;
+            const colisLocked = !isAdmin && !!c.quantite_colis;
+            const lockedStyle = 'background:var(--gris);color:var(--texte);border-color:transparent;cursor:not-allowed';
             return `<tr style="${c.quantite_colis&&c.quantite_colis<OBJECTIF_COLIS?'background:var(--rouge-pale)':''}">
               <td style="text-align:center;font-size:11px;color:var(--texte-doux);font-weight:700">${i}</td>
               <td style="position:sticky;left:0;background:${c.quantite_colis&&c.quantite_colis<OBJECTIF_COLIS?'#fee2e2':'white'};z-index:1">
                 <input style="width:48px;border:1.5px solid var(--gris-bord);border-radius:6px;font-size:12px;font-weight:700;text-align:center;padding:4px 2px" type="text" placeholder="Q?" value="${c.quai||''}" onblur="sauvegarderColisLigne(${sessNum},${i},'quai',this.value)" />
               </td>
               <td><input style="width:76px;border:none;background:transparent;font-size:11px;text-align:center" type="text" placeholder="—" value="${c.camion_h_debut||''}" onblur="sauvegarderColisLigne(${sessNum},${i},'camion_h_debut',this.value)" /></td>
-              <td><input style="width:72px;border:1.5px solid var(--gris-bord);border-radius:6px;font-size:11px;text-align:center;padding:4px" type="time" value="${c.heure_controle||''}" onchange="sauvegarderColisLigne(${sessNum},${i},'heure_controle',this.value)" /></td>
-              <td><input style="width:80px;border:1.5px solid var(--gris-bord);border-radius:8px;background:white;font-size:14px;font-weight:700;text-align:center;padding:5px 3px" type="number" placeholder="—" value="${c.quantite_colis||''}" onblur="sauvegarderColisLigne(${sessNum},${i},'quantite_colis',parseInt(this.value)||null)" /></td>
+              <td>${heureLocked
+                ? `<span style="display:inline-block;width:72px;text-align:center;font-size:12px;font-weight:700;color:var(--texte);background:var(--gris);border-radius:6px;padding:5px 4px;border:1.5px solid transparent">🔒 ${c.heure_controle}</span>`
+                : `<input style="width:72px;border:1.5px solid var(--gris-bord);border-radius:6px;font-size:11px;text-align:center;padding:4px" type="time" value="${c.heure_controle||''}" onchange="sauvegarderColisLigne(${sessNum},${i},'heure_controle',this.value)" />`
+              }</td>
+              <td>${colisLocked
+                ? `<span style="display:inline-block;width:80px;text-align:center;font-size:14px;font-weight:700;color:var(--texte);background:var(--gris);border-radius:8px;padding:6px 4px;border:1.5px solid transparent">🔒 ${c.quantite_colis}</span>`
+                : `<input style="width:80px;border:1.5px solid var(--gris-bord);border-radius:8px;background:white;font-size:14px;font-weight:700;text-align:center;padding:5px 3px" type="number" placeholder="—" value="${c.quantite_colis||''}" onblur="sauvegarderColisLigne(${sessNum},${i},'quantite_colis',parseInt(this.value)||null)" />`
+              }</td>
               <td style="font-weight:700;color:${mLColor};font-size:12px;text-align:center;white-space:nowrap">${moyL?`${moyL}`:'—'}</td>
               <td><input style="width:55px;border:1.5px solid var(--gris-bord);border-radius:8px;background:white;font-size:12px;text-align:center;padding:4px 2px" type="number" placeholder="0" value="${c.arret_machine_cumul||''}" onblur="sauvegarderColisLigne(${sessNum},${i},'arret_machine_cumul',parseInt(this.value)||0)" /></td>
             </tr>
