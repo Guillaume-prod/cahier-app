@@ -397,7 +397,7 @@ function renderColis(){
         </tr></thead>
         <tbody>
           ${lignes.map(({i,c})=>{
-            const idx = sorted.findIndex(x=>x===c||(x.id&&x.id===c.id));
+            const idx = c.id ? sorted.findIndex(x=>x.id===c.id) : -1;
             const moyL = idx>0 ? calcMoyenneLigne(sorted,idx) : null;
             const mLColor = moyL ? (moyL>=OBJECTIF_COLIS?'var(--vert)':'var(--rouge)') : 'var(--texte-doux)';
             return `<tr style="${c.quantite_colis&&c.quantite_colis<OBJECTIF_COLIS?'background:var(--rouge-pale)':''}">
@@ -849,6 +849,8 @@ async function sauvegarderColisLigne(sessNum, ligneNum, champ, valeur){
       if(autoHeure) c.heure_controle = autoHeure;
       if(autoCadence!==null) c.cadence_ok = autoCadence;
     }
+    // Re-render pour mettre à jour moyennes (seulement après blur, pas pendant saisie)
+    if(champ !== 'quai' && champ !== 'camion_h_debut' && champ !== 'raison_non_atteinte') render();
   }catch(e){ toast('Erreur: '+e.message,'err'); console.error('sauvegarderColisLigne',e); }
 }
 
