@@ -849,7 +849,7 @@ async function sauvegarderColisLigne(sessNum, ligneNum, champ, valeur){
       if(autoHeure) c.heure_controle = autoHeure;
       if(autoCadence!==null) c.cadence_ok = autoCadence;
     }
-  }catch(e){ toast('Erreur sauvegarde','err'); }
+  }catch(e){ toast('Erreur: '+e.message,'err'); console.error('sauvegarderColisLigne',e); }
 }
 
 // ── EPI ────────────────────────────────────────────────────────
