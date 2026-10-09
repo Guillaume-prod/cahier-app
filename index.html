@@ -835,7 +835,7 @@ async function sauvegarderColisLigne(sessNum, ligneNum, champ, valeur){
     const autoCadence = (champ==='quantite_colis' && valeur!=null) ? (valeur>=OBJECTIF_COLIS) : null;
 
     if(!c){
-      const body = {vacation_id:S.vacationId, session_numero:sessNum, ligne_numero:ligneNum, [champ]:valeur};
+      const body = {vacation_id:S.vacationId, session_numero:sessNum, ligne_numero:ligneNum, tranche:`S${sessNum}-L${ligneNum}`, [champ]:valeur};
       if(autoHeure) body.heure_controle = autoHeure;
       if(autoCadence!==null) body.cadence_ok = autoCadence;
       const created = await db.post('controles_colis', body);
