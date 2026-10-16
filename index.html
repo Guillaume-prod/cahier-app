@@ -373,8 +373,12 @@ function renderColis(){
   const toutesLessions = sessionsExistantes.includes(sessionCourante) ? sessionsExistantes : [...sessionsExistantes, sessionCourante].sort((a,b)=>a-b);
 
   function renderSession(sessNum){
+    // Nombre de lignes = max(5, lignes existantes en DB) + lignes ajoutées localement
+    const lignesEnDB = S.colisData.filter(x=>(x.session_numero||1)===sessNum).map(x=>x.ligne_numero||1);
+    const maxEnDB = lignesEnDB.length ? Math.max(...lignesEnDB) : 0;
+    const nbLignes = Math.max(5, maxEnDB, S.lignesSession?.[sessNum]||0);
     const lignes = [];
-    for(let i=1;i<=5;i++){
+    for(let i=1;i<=nbLignes;i++){
       const c = S.colisData.find(x=>(x.session_numero||1)===sessNum&&(x.ligne_numero||1)===i)||{};
       lignes.push({i, c});
     }
@@ -426,6 +430,7 @@ function renderColis(){
         </tbody>
       </table>
       </div>
+      <button onclick="ajouterLigneColis(${sessNum})" style="margin-top:6px;padding:6px 14px;background:var(--bleu-clair);color:var(--bleu);border:1.5px solid var(--bleu);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">＋ Ligne</button>
     </div>`;
   }
 
@@ -452,6 +457,15 @@ function ajouterSessionColis(){
   const sessions = [...new Set(S.colisData.map(c=>c.session_numero||1))];
   const max = sessions.length ? Math.max(...sessions) : 0;
   S.sessionColisActive = max + 1;
+  render();
+}
+
+function ajouterLigneColis(sessNum){
+  if(!S.lignesSession) S.lignesSession = {};
+  const lignesEnDB = S.colisData.filter(x=>(x.session_numero||1)===sessNum).map(x=>x.ligne_numero||1);
+  const maxEnDB = lignesEnDB.length ? Math.max(...lignesEnDB) : 0;
+  const actuel = Math.max(5, maxEnDB, S.lignesSession[sessNum]||0);
+  S.lignesSession[sessNum] = actuel + 1;
   render();
 }
 
@@ -859,7 +873,7 @@ async function changerCode(){
 async function deconnexion(){
   arreterRappelColis();
   await supabaseAuth.auth.signOut();
-  S = {agent:null, vue:'epi', loading:false, vacationId:null, date:getToday(), controles:[], colisData:[], epiData:[], epiValide:false, tournees:[], toutesVacations:[], adminVue:'liste', modalAgent:null, tousAgents:[], authSession:null, sessionColisActive:null, archiveDate:null, archivesData:null};
+  S = {agent:null, vue:'epi', loading:false, vacationId:null, date:getToday(), controles:[], colisData:[], epiData:[], epiValide:false, tournees:[], toutesVacations:[], adminVue:'liste', modalAgent:null, tousAgents:[], authSession:null, sessionColisActive:null, archiveDate:null, archivesData:null, lignesSession:{}};
   render();
 }
 
