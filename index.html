@@ -1153,16 +1153,6 @@ function exporterPDF(){
   `;
   document.body.appendChild(overlay);
 
-  // Clôturer automatiquement la vacation à la génération du PDF
-  if(S.vacationId){
-    arreterRappelColis();
-    db.patch('vacations_suivi',`id=eq.${S.vacationId}`,{terminee:true}).then(()=>{
-      const oldId = S.vacationId;
-      S.vacationId = null;
-      console.log('Vacation clôturée après export PDF', oldId);
-    }).catch(e=>console.error('Erreur clôture vacation PDF',e));
-  }
-
   // Style print pour masquer l'overlay chrome et imprimer uniquement le contenu
   const style = document.createElement('style');
   style.id = 'print-style';
