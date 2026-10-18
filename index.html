@@ -379,28 +379,7 @@ function renderBienvenue(){
         🚀 Commencer ma vacation
       </button>
     </div>
-  </div>
-  <script>
-  (function(){
-    const texte = ${JSON.stringify(msg.citation)};
-    let i = 0;
-    const typed = document.getElementById('bv-typed');
-    const cursor = document.getElementById('bv-cursor');
-    const auteur = document.getElementById('bv-auteur');
-    function tape(){
-      if(!typed) return;
-      if(i < texte.length){
-        typed.textContent += texte[i];
-        i++;
-        setTimeout(tape, 28 + Math.random()*18);
-      } else {
-        if(cursor) cursor.style.display='none';
-        if(auteur) auteur.style.opacity='1';
-      }
-    }
-    setTimeout(tape, 900);
-  })();
-  <\/script>`;
+  </div>`;
 }
 
 function demarrerVacation(){
@@ -414,7 +393,29 @@ function render(){
   const app = document.getElementById('app');
   if(!S.agent){ app.innerHTML = renderLogin(); return; }
   if(S.loading){ app.innerHTML = `<div style="text-align:center;padding:60px;color:var(--texte-doux)">⏳ Chargement...</div>`; return; }
-  if(S.vue==='bienvenue'){ app.innerHTML = renderBienvenue(); return; }
+  if(S.vue==='bienvenue'){
+    app.innerHTML = renderBienvenue();
+    // Lancer la machine à écrire après injection dans le DOM
+    const msg = getMessageDuJour();
+    let i = 0;
+    const texte = msg.citation;
+    function tapeBienvenue(){
+      const typed = document.getElementById('bv-typed');
+      const cursor = document.getElementById('bv-cursor');
+      const auteur = document.getElementById('bv-auteur');
+      if(!typed) return;
+      if(i < texte.length){
+        typed.textContent += texte[i];
+        i++;
+        setTimeout(tapeBienvenue, 28 + Math.random()*18);
+      } else {
+        if(cursor) cursor.style.display='none';
+        if(auteur) auteur.style.opacity='1';
+      }
+    }
+    setTimeout(tapeBienvenue, 900);
+    return;
+  }
   
   const nav = S.agent.est_responsable
     ? [['epi','🦺','EPI'],['chantiers','📋','Chantiers'],['colis','📦','Colis/h'],['pdf','📄','PDF'],['admin','⚙️','Admin']]
