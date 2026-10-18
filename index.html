@@ -200,11 +200,221 @@ function calcMoyenneLigne(sorted, index){
   return Math.round((diffColis/dureeEffective)*60);
 }
 
+// ── MESSAGES DE BIENVENUE ──────────────────────────────────────
+const MESSAGES_BIENVENUE = [
+  { citation: "Le succès est la somme de petits efforts répétés jour après jour.", auteur: "Robert Collier" },
+  { citation: "La qualité n'est jamais un accident ; c'est toujours le résultat d'un effort intelligent.", auteur: "John Ruskin" },
+  { citation: "Chaque journée est une nouvelle chance de faire mieux qu'hier.", auteur: "" },
+  { citation: "Le travail d'équipe est la capacité de travailler ensemble vers une vision commune.", auteur: "Andrew Carnegie" },
+  { citation: "La discipline est le pont entre les objectifs et les accomplissements.", auteur: "Jim Rohn" },
+  { citation: "Ce n'est pas la force, mais la constance de l'effort qui fait la différence.", auteur: "" },
+  { citation: "Un bon travail aujourd'hui vaut mieux qu'une promesse parfaite demain.", auteur: "" },
+  { citation: "La ponctualité est la politesse des rois… et des équipes performantes.", auteur: "" },
+  { citation: "Seul on va plus vite, ensemble on va plus loin.", auteur: "Proverbe africain" },
+  { citation: "Le secret du succès est de commencer.", auteur: "Mark Twain" },
+  { citation: "Chaque colis compté est un pas vers l'objectif. Bonne vacation !", auteur: "" },
+  { citation: "La précision dans le travail, c'est le respect du client.", auteur: "" },
+  { citation: "Un objectif sans plan n'est qu'un souhait. Avec le cahier, on a le plan !", auteur: "" },
+  { citation: "Le meilleur moyen de prédire l'avenir, c'est de le créer.", auteur: "Peter Drucker" },
+  { citation: "Faites chaque jour quelque chose qui vous rapproche de l'objectif.", auteur: "" },
+  { citation: "La rigueur aujourd'hui, c'est la fierté demain.", auteur: "" },
+  { citation: "Une équipe soudée déplace des montagnes — ou des colis !", auteur: "" },
+  { citation: "Le professionnalisme, c'est faire ce qu'on aime même quand on n'en a pas envie.", auteur: "" },
+  { citation: "La réussite appartient à ceux qui restent focalisés sur leurs objectifs.", auteur: "" },
+  { citation: "Chaque contrôle réussi est une victoire collective.", auteur: "" },
+  { citation: "L'excellence est une habitude, pas un acte.", auteur: "Aristote" },
+  { citation: "Travailler avec cœur, c'est travailler avec efficacité.", auteur: "" },
+  { citation: "La sécurité d'abord, la performance ensuite — les deux ensemble, c'est l'idéal.", auteur: "" },
+  { citation: "On ne construit pas une réputation sur ce qu'on va faire.", auteur: "Henry Ford" },
+  { citation: "Le résultat de ce soir sera le reflet de l'engagement d'aujourd'hui.", auteur: "" },
+  { citation: "Soyez la raison pour laquelle votre équipe donne le meilleur d'elle-même.", auteur: "" },
+  { citation: "La motivation vous démarre, l'habitude vous maintient en marche.", auteur: "" },
+  { citation: "Chaque défi surmonté renforce l'équipe pour le suivant.", auteur: "" },
+  { citation: "Bien fait vaut mieux que vite fait.", auteur: "" },
+  { citation: "Votre travail remplit une grande partie de votre vie — faites-le bien.", auteur: "Steve Jobs" },
+  { citation: "La persévérance, c'est transformer l'obstacle en opportunité.", auteur: "" },
+  { citation: "Ce qui se mesure s'améliore — bienvenue dans le cahier de vacation !", auteur: "" },
+  { citation: "L'attention aux détails fait toute la différence entre le bon et l'excellent.", auteur: "" },
+  { citation: "Ensemble, nous sommes plus forts que la somme de nos talents individuels.", auteur: "" },
+  { citation: "La journée commence bien quand l'équipe est prête et motivée.", auteur: "" },
+  { citation: "Un contrôle bien fait aujourd'hui évite un problème demain.", auteur: "" },
+  { citation: "La confiance se construit par des actes, pas des mots.", auteur: "" },
+  { citation: "Le talent gagne des matchs, mais le travail d'équipe remporte des championnats.", auteur: "Michael Jordan" },
+  { citation: "Il n'y a pas de raccourci vers un endroit qui vaut la peine d'être atteint.", auteur: "Beverly Sills" },
+  { citation: "La force de l'équipe vient de chaque membre. La force de chaque membre, c'est l'équipe.", auteur: "Phil Jackson" },
+  { citation: "Ce que vous faites aujourd'hui peut améliorer tous vos demains.", auteur: "Ralph Marston" },
+  { citation: "Ne regardez pas l'horloge ; faites comme elle — continuez d'avancer.", auteur: "Sam Levenson" },
+  { citation: "Le travail bien accompli apporte une satisfaction que rien d'autre ne peut égaler.", auteur: "" },
+  { citation: "Chaque matin apporte de nouvelles forces et de nouvelles pensées.", auteur: "Ralph Waldo Emerson" },
+  { citation: "Le succès n'est pas final, l'échec n'est pas fatal : c'est le courage de continuer qui compte.", auteur: "Winston Churchill" },
+  { citation: "La grandeur n'est pas dans la richesse, mais dans le service aux autres.", auteur: "" },
+  { citation: "Agissez comme si ce que vous faites faisait une différence. C'est le cas.", auteur: "William James" },
+  { citation: "La vraie mesure d'un homme, c'est ce qu'il fait quand personne ne le regarde.", auteur: "" },
+  { citation: "Votre attitude détermine votre direction.", auteur: "" },
+  { citation: "Chaque expert a été un jour un débutant.", auteur: "" },
+  { citation: "Le respect se gagne, l'honnêteté s'apprécie, la confiance se mérite.", auteur: "" },
+  { citation: "La meilleure façon de prédire votre avenir, c'est de le créer.", auteur: "Abraham Lincoln" },
+  { citation: "Les grandes choses ne sont jamais faites par une seule personne ; elles sont faites par une équipe.", auteur: "Steve Jobs" },
+  { citation: "La victoire appartient aux plus persévérants.", auteur: "Napoléon Bonaparte" },
+  { citation: "Peu importe la vitesse à laquelle vous avancez tant que vous n'arrêtez pas.", auteur: "Confucius" },
+  { citation: "La meilleure préparation pour demain, c'est de faire de son mieux aujourd'hui.", auteur: "H. Jackson Brown" },
+  { citation: "Celui qui déplace une montagne commence par déplacer de petites pierres.", auteur: "Confucius" },
+  { citation: "Un jour ou l'autre, les personnes qui ne renoncent pas finissent par gagner.", auteur: "" },
+  { citation: "Travaillez dur en silence, laissez le succès faire le bruit.", auteur: "" },
+  { citation: "La différence entre l'ordinaire et l'extraordinaire, c'est ce petit plus.", auteur: "Jimmy Johnson" },
+  { citation: "Si vous pouvez le rêver, vous pouvez le faire.", auteur: "Walt Disney" },
+  { citation: "Ce n'est pas parce que les choses sont difficiles que nous n'osons pas, c'est parce que nous n'osons pas qu'elles sont difficiles.", auteur: "Sénèque" },
+  { citation: "Il n'y a pas de vent favorable pour celui qui ne sait pas où il va.", auteur: "Sénèque" },
+  { citation: "L'important n'est pas de savoir combien de fois vous tombez, mais combien de fois vous vous relevez.", auteur: "" },
+  { citation: "Le succès, c'est d'aller d'échec en échec sans perdre son enthousiasme.", auteur: "Winston Churchill" },
+  { citation: "Soyez le changement que vous voulez voir dans le monde.", auteur: "Gandhi" },
+  { citation: "Donnez le meilleur de vous-même et le meilleur viendra à vous.", auteur: "" },
+  { citation: "La vie est trop courte pour faire les choses à moitié.", auteur: "" },
+  { citation: "Une équipe qui rit ensemble, performe ensemble.", auteur: "" },
+  { citation: "Les défis font partie du voyage — ce qui compte, c'est comment on les traverse.", auteur: "" },
+  { citation: "Un sourire le matin peut changer toute une journée pour votre équipe.", auteur: "" },
+  { citation: "Le travail en équipe commence par construire la confiance.", auteur: "Patrick Lencioni" },
+  { citation: "Chaque jour est une opportunité d'être meilleur qu'hier.", auteur: "" },
+  { citation: "La discipline, c'est choisir entre ce que vous voulez maintenant et ce que vous voulez le plus.", auteur: "" },
+  { citation: "Prenez soin de vos collègues et ils prendront soin du travail.", auteur: "Richard Branson" },
+  { citation: "Le bon travail ne se voit pas, mais le mauvais travail se remarque toujours.", auteur: "" },
+  { citation: "Ceux qui croient en nos capacités font naître en nous quelque chose de merveilleux.", auteur: "" },
+  { citation: "Un objectif clair vaut mieux que dix vagues intentions.", auteur: "" },
+  { citation: "Chaque heure bien travaillée est une victoire personnelle.", auteur: "" },
+  { citation: "La passion est l'énergie. Sentez la puissance qui vient de la concentration sur ce qui vous enthousiasme.", auteur: "Oprah Winfrey" },
+  { citation: "Réussir, c'est avancer d'une erreur à la suivante sans perdre son enthousiasme.", auteur: "" },
+  { citation: "Votre engagement d'aujourd'hui construit votre réputation de demain.", auteur: "" },
+  { citation: "Un bon chef écoute avant de parler.", auteur: "" },
+  { citation: "La productivité, c'est ne jamais être satisfait de soi-même sans s'épuiser.", auteur: "" },
+  { citation: "Le respect mutuel est le fondement de toute bonne équipe.", auteur: "" },
+  { citation: "Commencez là où vous êtes. Utilisez ce que vous avez. Faites ce que vous pouvez.", auteur: "Arthur Ashe" },
+  { citation: "Faites de votre mieux jusqu'à ce que vous sachiez mieux faire. Puis faites mieux.", auteur: "Maya Angelou" },
+  { citation: "Les personnes positives ont des projets, les personnes négatives ont des problèmes.", auteur: "" },
+  { citation: "Votre energie du matin donne le ton à toute la journée.", auteur: "" },
+  { citation: "Ce que nous répétons chaque jour, nous le devenons.", auteur: "" },
+  { citation: "La générosité au travail crée une culture de l'excellence.", auteur: "" },
+  { citation: "Chaque tâche accomplie avec soin est une œuvre d'art à sa façon.", auteur: "" },
+  { citation: "Les équipes gagnantes se préparent, les équipes perdantes s'improvisent.", auteur: "" },
+  { citation: "Il vaut mieux allumer une bougie que maudire l'obscurité.", auteur: "Proverbe chinois" },
+  { citation: "Personne n'a jamais réussi seul. Derrière chaque succès, il y a une équipe.", auteur: "" },
+  { citation: "La bonne humeur est contagieuse — partagez-la sans modération !", auteur: "" },
+  { citation: "Ce qui compte ce n'est pas d'être le meilleur, c'est de donner le meilleur.", auteur: "" },
+  { citation: "L'entraide est la clé qui ouvre les portes les plus lourdes.", auteur: "" },
+  { citation: "Chaque geste professionnel accompli avec soin est une marque de respect envers les autres.", auteur: "" },
+  { citation: "Un esprit positif transforme les défis en opportunités.", auteur: "" },
+  { citation: "Les petites actions quotidiennes construisent les grandes réussites.", auteur: "" },
+];
+
+function getMessageDuJour(){
+  const today = getToday();
+  // Utiliser la date pour choisir un message différent chaque jour
+  const seed = today.replace(/-/g,'');
+  const idx = parseInt(seed) % MESSAGES_BIENVENUE.length;
+  return MESSAGES_BIENVENUE[idx];
+}
+
+function doitAfficherBienvenue(){
+  try{
+    const key = `bienvenue_${S.agent.id}_${getToday()}`;
+    return !localStorage.getItem(key);
+  }catch(e){ return false; }
+}
+
+function marquerBienvenueVue(){
+  try{
+    const key = `bienvenue_${S.agent.id}_${getToday()}`;
+    localStorage.setItem(key, '1');
+  }catch(e){}
+}
+
+function renderBienvenue(){
+  const msg = getMessageDuJour();
+  const equipeEmoji = {'Matin':'☀️','Aprem':'🌆','Soirée':'🌙','Nuit':'🌙','Concentration':'📦'}[S.agent.equipe]||'👋';
+  const heureStr = new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
+  // Générer les particules
+  const particules = Array.from({length:22},(_,i)=>{
+    const x = Math.random()*100, y = Math.random()*100;
+    const s = 2+Math.random()*4, d = 3+Math.random()*6, delay = Math.random()*4;
+    const op = 0.2+Math.random()*0.5;
+    return `<div style="position:absolute;left:${x}%;top:${y}%;width:${s}px;height:${s}px;background:rgba(255,255,255,${op});border-radius:50%;animation:flotter ${d}s ease-in-out ${delay}s infinite alternate;pointer-events:none"></div>`;
+  }).join('');
+  return `
+  <style>
+    @keyframes fadeSlideDown{from{opacity:0;transform:translateY(-24px)}to{opacity:1;transform:translateY(0)}}
+    @keyframes fadeSlideUp{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:translateY(0)}}
+    @keyframes fadeIn{from{opacity:0}to{opacity:1}}
+    @keyframes flotter{from{transform:translateY(0) scale(1)}to{transform:translateY(-18px) scale(1.15)}}
+    @keyframes pulseBtn{0%,100%{box-shadow:0 4px 20px rgba(0,0,0,0.2),0 0 0 0 rgba(255,255,255,0.4)}50%{box-shadow:0 4px 20px rgba(0,0,0,0.2),0 0 0 10px rgba(255,255,255,0)}}
+    @keyframes typewriter{from{width:0}to{width:100%}}
+    @keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
+    .bv-emoji{animation:fadeSlideDown 0.6s ease both}
+    .bv-nom{animation:fadeSlideDown 0.7s 0.15s ease both;opacity:0;animation-fill-mode:forwards}
+    .bv-date{animation:fadeSlideDown 0.7s 0.3s ease both;opacity:0;animation-fill-mode:forwards}
+    .bv-equipe{animation:fadeIn 0.7s 0.45s ease both;opacity:0;animation-fill-mode:forwards}
+    .bv-card{animation:fadeSlideUp 0.8s 0.5s ease both;opacity:0;animation-fill-mode:forwards}
+    .bv-objectif{animation:fadeSlideUp 0.8s 0.75s ease both;opacity:0;animation-fill-mode:forwards}
+    .bv-btn{animation:fadeSlideUp 0.8s 1s ease both,pulseBtn 2s 2s infinite;opacity:0;animation-fill-mode:forwards}
+    .bv-cursor{display:inline-block;animation:blink 0.8s step-end infinite;color:rgba(255,255,255,0.8)}
+    .bv-citation-wrap{overflow:hidden;white-space:normal}
+  </style>
+  <div id="bv-root" style="min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;background:linear-gradient(135deg,#1a3a6b 0%,#1a56a0 60%,#2563eb 100%);position:relative;overflow:hidden">
+    ${particules}
+    <div style="position:relative;z-index:1;width:100%;max-width:380px;display:flex;flex-direction:column;align-items:center">
+      <div style="text-align:center;color:white;margin-bottom:28px">
+        <div class="bv-emoji" style="font-size:52px;margin-bottom:8px">${equipeEmoji}</div>
+        <div class="bv-nom" style="font-size:26px;font-weight:800;margin-bottom:4px">Bonjour ${S.agent.prenom} !</div>
+        <div class="bv-date" style="font-size:14px;opacity:0.8">${fmtDate(getToday())} · ${heureStr}</div>
+        ${S.agent.equipe?`<div class="bv-equipe" style="margin-top:10px;display:inline-block;padding:5px 16px;background:rgba(255,255,255,0.2);border-radius:20px;font-size:13px;font-weight:600">Équipe ${S.agent.equipe}</div>`:''}
+      </div>
+      <div class="bv-card" style="background:rgba(255,255,255,0.12);backdrop-filter:blur(12px);border:1px solid rgba(255,255,255,0.25);border-radius:20px;padding:28px 24px;width:100%;text-align:center;margin-bottom:24px">
+        <div style="font-size:28px;margin-bottom:14px">💬</div>
+        <div id="bv-citation-text" style="font-size:15px;font-style:italic;color:white;line-height:1.6;margin-bottom:12px;min-height:48px">"<span id="bv-typed"></span><span class="bv-cursor" id="bv-cursor">|</span>"</div>
+        <div id="bv-auteur" style="font-size:12px;color:rgba(255,255,255,0.7);font-weight:600;opacity:0;transition:opacity 0.5s">${msg.auteur?`— ${msg.auteur}`:''}</div>
+      </div>
+      <div class="bv-objectif" style="background:white;border-radius:16px;padding:14px 20px;width:100%;text-align:center;margin-bottom:16px">
+        <div style="font-size:13px;color:#5a6478;margin-bottom:2px">Objectif journalier</div>
+        <div style="font-size:28px;font-weight:800;color:#1a56a0">${OBJECTIF_COLIS} colis/h</div>
+      </div>
+      <button class="bv-btn" onclick="demarrerVacation()" style="width:100%;padding:16px;background:white;color:#1a56a0;border:none;border-radius:14px;font-size:16px;font-weight:800;cursor:pointer">
+        🚀 Commencer ma vacation
+      </button>
+    </div>
+  </div>
+  <script>
+  (function(){
+    const texte = ${JSON.stringify(msg.citation)};
+    let i = 0;
+    const typed = document.getElementById('bv-typed');
+    const cursor = document.getElementById('bv-cursor');
+    const auteur = document.getElementById('bv-auteur');
+    function tape(){
+      if(!typed) return;
+      if(i < texte.length){
+        typed.textContent += texte[i];
+        i++;
+        setTimeout(tape, 28 + Math.random()*18);
+      } else {
+        if(cursor) cursor.style.display='none';
+        if(auteur) auteur.style.opacity='1';
+      }
+    }
+    setTimeout(tape, 900);
+  })();
+  <\/script>`;
+}
+
+function demarrerVacation(){
+  marquerBienvenueVue();
+  S.vue = 'epi';
+  render();
+}
+
 // ── RENDER ─────────────────────────────────────────────────────
 function render(){
   const app = document.getElementById('app');
   if(!S.agent){ app.innerHTML = renderLogin(); return; }
   if(S.loading){ app.innerHTML = `<div style="text-align:center;padding:60px;color:var(--texte-doux)">⏳ Chargement...</div>`; return; }
+  if(S.vue==='bienvenue'){ app.innerHTML = renderBienvenue(); return; }
   
   const nav = S.agent.est_responsable
     ? [['epi','🦺','EPI'],['chantiers','📋','Chantiers'],['colis','📦','Colis/h'],['pdf','📄','PDF'],['admin','⚙️','Admin']]
@@ -842,7 +1052,12 @@ async function connexion(){
     S.authSession = data.session;
     S.loading = true; render();
     await chargerTout();
-    S.loading = false; render();
+    S.loading = false;
+    // Afficher la page de bienvenue à la première connexion du jour
+    if(doitAfficherBienvenue()){
+      S.vue = 'bienvenue';
+    }
+    render();
     await demanderPermissionNotif();
     demarrerRappelColis();
   }catch(e){ toast('Erreur connexion','err'); console.error(e); }
