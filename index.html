@@ -201,6 +201,39 @@ function calcMoyenneLigne(sorted, index){
 }
 
 // ── MESSAGES DE BIENVENUE ──────────────────────────────────────
+const BLAGUES = [
+  { texte: "Pourquoi les plongeurs plongent-ils toujours en arrière et jamais en avant ?", chute: "Parce que sinon ils tomberaient dans le bateau !" },
+  { texte: "Un homme entre dans une bibliothèque et demande : « Vous avez des livres sur la paranoïa ? »", chute: "Le bibliothécaire répond : « Ils sont juste derrière vous ! »" },
+  { texte: "Qu'est-ce qu'un crocodile qui surveille la cour d'école ?", chute: "Un sac à dents !" },
+  { texte: "Pourquoi les informaticiens confondent-ils Halloween et Noël ?", chute: "Parce que OCT 31 = DEC 25 !" },
+  { texte: "Un colis entre dans un bar.", chute: "Le barman dit : « Désolé, on ne sert pas les emballés ici. »" },
+  { texte: "Comment appelle-t-on un chat tombé dans un pot de peinture le jour de Noël ?", chute: "Un chat-peint de Noël !" },
+  { texte: "Qu'est-ce qu'un canif ?", chute: "Le petit frère du canif… couteau !" },
+  { texte: "Pourquoi le facteur a-t-il été licencié ?", chute: "Parce qu'il distribuait trop de courriers… sans les lire !" },
+  { texte: "Un homme dit à son médecin : « Docteur, je me prends pour un colis. »", chute: "Le médecin répond : « Posez-vous là, je vais vous examiner. »" },
+  { texte: "Quelle est la différence entre un croissant et une armoire ?", chute: "On ne peut pas mettre ses affaires dans un croissant… enfin, pas facilement." },
+  { texte: "Pourquoi les girafes ont-elles un si long cou ?", chute: "Parce que leurs pieds sentent très fort !" },
+  { texte: "Comment dit-on « livraison express » en japonais ?", chute: "Kolis-rapid-o !" },
+  { texte: "Un colis dit à l'autre : « T'as l'air bien emballé aujourd'hui ! »", chute: "L'autre répond : « Normal, c'est mon jour de tri. »" },
+  { texte: "Qu'est-ce qu'un mauvais trappeur ?", chute: "Un chasseur de primes qui n'a pas de prime !" },
+  { texte: "Pourquoi les squelettes ne se battent-ils jamais ?", chute: "Ils n'ont pas le cœur à ça !" },
+  { texte: "Comment appelle-t-on un boomerang qui ne revient pas ?", chute: "Un bâton !" },
+  { texte: "Qu'est-ce qu'un cannibal végétarien ?", chute: "Quelqu'un qui ne mange que des têtes de noix !" },
+  { texte: "Pourquoi les Belges mettent-ils leur lit contre le mur ?", chute: "Pour dormir contre le mur… enfin pour être sûrs de ne pas tomber !" },
+  { texte: "Un homme entre dans un café.", chute: "Plouf !" },
+  { texte: "Comment s'appelle la ceinture faite de montres ?", chute: "Une ceinture… perd de temps !" },
+  { texte: "Qu'est-ce qu'un chat qui tombe dans la poubelle ?", chute: "Un déchet-cat !" },
+  { texte: "Comment appelle-t-on un avion qui fait demi-tour ?", chute: "Un re-tour opérateur !" },
+  { texte: "Qu'est-ce que le comble pour un électricien ?", chute: "De ne pas être au courant !" },
+  { texte: "Qu'est-ce que le comble pour un jardinier ?", chute: "De perdre la boule !" },
+  { texte: "Qu'est-ce qu'un Ninja qui fait de la plongée ?", chute: "Un Ninja sub-marin !" },
+  { texte: "Un homme arrive en retard au travail. Son chef lui dit : « Vous deviez être là à 9h ! »", chute: "Il répond : « Pourquoi, il s'est passé quelque chose ? »" },
+  { texte: "Qu'est-ce qu'un crocodile qui surveille les colis ?", chute: "Un mâche-oire de livraison !" },
+  { texte: "Combien faut-il de chauffeurs de bus pour changer une ampoule ?", chute: "Un seul, mais il faut que l'ampoule veuille changer !" },
+  { texte: "Pourquoi l'épouvantail a-t-il reçu un prix ?", chute: "Parce qu'il était exceptionnel dans son domaine !" },
+  { texte: "Comment appelle-t-on un chat dans un avion ?", chute: "Un félin d'altitude !" },
+];
+
 const MESSAGES_BIENVENUE = [
   { citation: "Le succès est la somme de petits efforts répétés jour après jour.", auteur: "Robert Collier" },
   { citation: "La qualité n'est jamais un accident ; c'est toujours le résultat d'un effort intelligent.", auteur: "John Ruskin" },
@@ -366,20 +399,121 @@ function renderBienvenue(){
         <div class="bv-date" style="font-size:14px;opacity:0.8">${fmtDate(getToday())} · ${heureStr}</div>
         ${S.agent.equipe?`<div class="bv-equipe" style="margin-top:10px;display:inline-block;padding:5px 16px;background:rgba(255,255,255,0.2);border-radius:20px;font-size:13px;font-weight:600">Équipe ${S.agent.equipe}</div>`:''}
       </div>
-      <div class="bv-card" style="background:rgba(255,255,255,0.12);backdrop-filter:blur(12px);border:1px solid rgba(255,255,255,0.25);border-radius:20px;padding:28px 24px;width:100%;text-align:center;margin-bottom:24px">
-        <div style="font-size:28px;margin-bottom:14px">💬</div>
-        <div id="bv-citation-text" style="font-size:15px;font-style:italic;color:white;line-height:1.6;margin-bottom:12px;min-height:48px">"<span id="bv-typed"></span><span class="bv-cursor" id="bv-cursor">|</span>"</div>
-        <div id="bv-auteur" style="font-size:12px;color:rgba(255,255,255,0.7);font-weight:600;opacity:0;transition:opacity 0.8s;min-height:18px">${msg.auteur?`— ${msg.auteur}`:'— Anonyme'}</div>
-      </div>
       <div class="bv-objectif" style="background:white;border-radius:16px;padding:14px 20px;width:100%;text-align:center;margin-bottom:16px">
         <div style="font-size:13px;color:#5a6478;margin-bottom:2px">Objectif journalier</div>
         <div style="font-size:28px;font-weight:800;color:#1a56a0">${OBJECTIF_COLIS} colis/h</div>
       </div>
-      <button class="bv-btn" onclick="demarrerVacation()" style="width:100%;padding:16px;background:white;color:#1a56a0;border:none;border-radius:14px;font-size:16px;font-weight:800;cursor:pointer">
+      <button class="bv-btn" onclick="allerChoixBienvenue()" style="width:100%;padding:16px;background:white;color:#1a56a0;border:none;border-radius:14px;font-size:16px;font-weight:800;cursor:pointer">
         🚀 Commencer ma vacation
       </button>
     </div>
   </div>`;
+}
+
+function allerChoixBienvenue(){
+  S.vue = 'choix-bienvenue';
+  render();
+}
+
+function getBlagueduJour(){
+  const today = getToday();
+  const seed = today.replace(/-/g,'');
+  const idx = parseInt(seed) % BLAGUES.length;
+  return BLAGUES[idx];
+}
+
+function renderChoixBienvenue(){
+  const gifs = [
+    'https://media.giphy.com/media/3o7abKhOpu0NwenH3O/giphy.gif', // penseur rigolo
+    'https://media.giphy.com/media/l3q2K5jinAlChoCLS/giphy.gif',  // choix
+    'https://media.giphy.com/media/xT9IgG50Lg7russbDa/giphy.gif', // hésitation
+  ];
+  const today = getToday();
+  const gif = gifs[parseInt(today.replace(/-/g,'')) % gifs.length];
+  return `
+  <style>
+    @keyframes popIn{from{opacity:0;transform:scale(0.85)}to{opacity:1;transform:scale(1)}}
+    .choix-card{animation:popIn 0.4s ease both}
+    .choix-btn{transition:transform 0.15s,box-shadow 0.15s}
+    .choix-btn:active{transform:scale(0.96)}
+  </style>
+  <div style="min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;background:linear-gradient(135deg,#1a3a6b 0%,#1a56a0 60%,#2563eb 100%)">
+    <div class="choix-card" style="background:rgba(255,255,255,0.13);backdrop-filter:blur(12px);border:1px solid rgba(255,255,255,0.25);border-radius:24px;padding:32px 24px;max-width:360px;width:100%;text-align:center">
+      <img src="${gif}" alt="" style="width:130px;height:130px;object-fit:cover;border-radius:16px;margin-bottom:20px;border:3px solid rgba(255,255,255,0.3)" onerror="this.style.display='none'"/>
+      <div style="font-size:22px;font-weight:800;color:white;margin-bottom:8px">Avant de commencer…</div>
+      <div style="font-size:15px;color:rgba(255,255,255,0.85);margin-bottom:28px;line-height:1.5">Qu'est-ce qui te ferait plaisir pour démarrer cette vacation ?</div>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <button class="choix-btn" onclick="afficherBlague()" style="padding:16px;background:white;color:#1a56a0;border:none;border-radius:14px;font-size:15px;font-weight:800;cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,0.15)">
+          😄 Une p'tite blagounette
+        </button>
+        <button class="choix-btn" onclick="afficherCitationBienvenue()" style="padding:16px;background:rgba(255,255,255,0.15);color:white;border:2px solid rgba(255,255,255,0.4);border-radius:14px;font-size:15px;font-weight:800;cursor:pointer">
+          💬 La citation du jour
+        </button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderBlague(){
+  const b = getBlagueduJour();
+  return `
+  <style>
+    @keyframes popIn{from{opacity:0;transform:scale(0.85)}to{opacity:1;transform:scale(1)}}
+    @keyframes revealChute{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+    .blague-card{animation:popIn 0.4s ease both}
+  </style>
+  <div style="min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;background:linear-gradient(135deg,#1a3a6b 0%,#1a56a0 60%,#2563eb 100%)">
+    <div class="blague-card" style="background:rgba(255,255,255,0.13);backdrop-filter:blur(12px);border:1px solid rgba(255,255,255,0.25);border-radius:24px;padding:32px 24px;max-width:360px;width:100%;text-align:center">
+      <div style="font-size:40px;margin-bottom:16px">😄</div>
+      <div style="font-size:16px;color:white;line-height:1.6;margin-bottom:20px;font-style:italic">"${b.texte}"</div>
+      <div id="blague-chute" style="display:none;background:rgba(255,255,255,0.15);border-radius:12px;padding:14px 16px;margin-bottom:20px;animation:revealChute 0.4s ease both">
+        <div style="font-size:15px;color:white;font-weight:700;line-height:1.5">${b.chute}</div>
+      </div>
+      <button id="btn-chute" onclick="revelerChute()" style="width:100%;padding:14px;background:white;color:#1a56a0;border:none;border-radius:12px;font-size:14px;font-weight:800;cursor:pointer;margin-bottom:10px">
+        🥁 Voir la chute !
+      </button>
+      <button id="btn-go" onclick="demarrerVacation()" style="display:none;width:100%;padding:14px;background:rgba(255,255,255,0.9);color:#1a56a0;border:none;border-radius:12px;font-size:14px;font-weight:800;cursor:pointer">
+        🚀 Allez, on y va !
+      </button>
+    </div>
+  </div>`;
+}
+
+function renderCitationBienvenue(){
+  const msg = getMessageDuJour();
+  return `
+  <style>
+    @keyframes popIn{from{opacity:0;transform:scale(0.85)}to{opacity:1;transform:scale(1)}}
+    @keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
+    .cit-card{animation:popIn 0.4s ease both}
+    .bv-cursor2{display:inline-block;animation:blink 0.8s step-end infinite}
+  </style>
+  <div style="min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;background:linear-gradient(135deg,#1a3a6b 0%,#1a56a0 60%,#2563eb 100%)">
+    <div class="cit-card" style="background:rgba(255,255,255,0.13);backdrop-filter:blur(12px);border:1px solid rgba(255,255,255,0.25);border-radius:24px;padding:32px 24px;max-width:360px;width:100%;text-align:center">
+      <div style="font-size:40px;margin-bottom:16px">💬</div>
+      <div style="font-size:15px;font-style:italic;color:white;line-height:1.6;margin-bottom:14px;min-height:60px">"<span id="bv-typed2"></span><span class="bv-cursor2" id="bv-cursor2">|</span>"</div>
+      <div id="bv-auteur2" style="font-size:13px;color:rgba(255,255,255,0.7);font-weight:600;opacity:0;transition:opacity 0.8s;margin-bottom:24px">${msg.auteur?`— ${msg.auteur}`:'— Anonyme'}</div>
+      <button id="btn-go-cit" onclick="demarrerVacation()" style="display:none;width:100%;padding:14px;background:white;color:#1a56a0;border:none;border-radius:12px;font-size:14px;font-weight:800;cursor:pointer">
+        🚀 Allez, on y va !
+      </button>
+    </div>
+  </div>`;
+}
+
+function afficherBlague(){
+  S.vue = 'blague';
+  render();
+}
+
+function afficherCitationBienvenue(){
+  S.vue = 'citation-bienvenue';
+  render();
+}
+
+function revelerChute(){
+  document.getElementById('blague-chute').style.display='block';
+  document.getElementById('btn-chute').style.display='none';
+  document.getElementById('btn-go').style.display='block';
 }
 
 function demarrerVacation(){
@@ -393,30 +527,28 @@ function render(){
   const app = document.getElementById('app');
   if(!S.agent){ app.innerHTML = renderLogin(); return; }
   if(S.loading){ app.innerHTML = `<div style="text-align:center;padding:60px;color:var(--texte-doux)">⏳ Chargement...</div>`; return; }
-  if(S.vue==='bienvenue'){
-    app.innerHTML = renderBienvenue();
-    // Lancer la machine à écrire après injection dans le DOM
-    const msg = getMessageDuJour();
-    let i = 0;
-    const texte = msg.citation;
-    function tapeBienvenue(){
-      const typed = document.getElementById('bv-typed');
-      const cursor = document.getElementById('bv-cursor');
-      const auteur = document.getElementById('bv-auteur');
+  if(S.vue==='bienvenue'){ app.innerHTML = renderBienvenue(); return; }
+  if(S.vue==='choix-bienvenue'){ app.innerHTML = renderChoixBienvenue(); return; }
+  if(S.vue==='blague'){ app.innerHTML = renderBlague(); return; }
+  if(S.vue==='citation-bienvenue'){
+    app.innerHTML = renderCitationBienvenue();
+    // Machine à écrire sur la page citation
+    const msg2 = getMessageDuJour();
+    let j = 0; const texte2 = msg2.citation;
+    function tapeCitation(){
+      const typed = document.getElementById('bv-typed2');
+      const cursor = document.getElementById('bv-cursor2');
+      const auteur = document.getElementById('bv-auteur2');
+      const btnGo = document.getElementById('btn-go-cit');
       if(!typed) return;
-      if(i < texte.length){
-        typed.textContent += texte[i];
-        i++;
-        setTimeout(tapeBienvenue, 28 + Math.random()*18);
-      } else {
+      if(j < texte2.length){ typed.textContent += texte2[j]; j++; setTimeout(tapeCitation, 28 + Math.random()*18); }
+      else {
         if(cursor) cursor.style.display='none';
-        if(auteur){
-          auteur.style.transition='opacity 0.8s';
-          auteur.style.opacity='1';
-        }
+        if(auteur){auteur.style.transition='opacity 0.8s';auteur.style.opacity='1';}
+        setTimeout(()=>{ if(btnGo) btnGo.style.display='block'; }, 800);
       }
     }
-    setTimeout(tapeBienvenue, 900);
+    setTimeout(tapeCitation, 300);
     return;
   }
   
