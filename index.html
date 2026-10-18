@@ -369,7 +369,7 @@ function renderBienvenue(){
       <div class="bv-card" style="background:rgba(255,255,255,0.12);backdrop-filter:blur(12px);border:1px solid rgba(255,255,255,0.25);border-radius:20px;padding:28px 24px;width:100%;text-align:center;margin-bottom:24px">
         <div style="font-size:28px;margin-bottom:14px">💬</div>
         <div id="bv-citation-text" style="font-size:15px;font-style:italic;color:white;line-height:1.6;margin-bottom:12px;min-height:48px">"<span id="bv-typed"></span><span class="bv-cursor" id="bv-cursor">|</span>"</div>
-        <div id="bv-auteur" style="font-size:12px;color:rgba(255,255,255,0.7);font-weight:600;opacity:0;transition:opacity 0.5s">${msg.auteur?`— ${msg.auteur}`:''}</div>
+        <div id="bv-auteur" style="font-size:12px;color:rgba(255,255,255,0.7);font-weight:600;opacity:0;transition:opacity 0.8s;min-height:18px">${msg.auteur?`— ${msg.auteur}`:'— Anonyme'}</div>
       </div>
       <div class="bv-objectif" style="background:white;border-radius:16px;padding:14px 20px;width:100%;text-align:center;margin-bottom:16px">
         <div style="font-size:13px;color:#5a6478;margin-bottom:2px">Objectif journalier</div>
@@ -410,7 +410,10 @@ function render(){
         setTimeout(tapeBienvenue, 28 + Math.random()*18);
       } else {
         if(cursor) cursor.style.display='none';
-        if(auteur) auteur.style.opacity='1';
+        if(auteur){
+          auteur.style.transition='opacity 0.8s';
+          auteur.style.opacity='1';
+        }
       }
     }
     setTimeout(tapeBienvenue, 900);
