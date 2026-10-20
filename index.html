@@ -863,7 +863,7 @@ function renderColis(){
               <td style="font-weight:700;color:${mLColor};font-size:12px;text-align:center;white-space:nowrap">${moyL?`${moyL}`:'—'}</td>
               <td><input style="width:55px;border:1.5px solid var(--gris-bord);border-radius:8px;background:white;font-size:12px;text-align:center;padding:4px 2px" type="number" placeholder="0" value="${c.arret_machine_cumul||''}" onblur="sauvegarderColisLigne(${sessNum},${i},'arret_machine_cumul',parseInt(this.value)||0)" /></td>
             </tr>
-            ${(c.quantite_colis&&c.quantite_colis<OBJECTIF_COLIS)?`<tr style="background:var(--orange-pale)"><td colspan="7" style="padding:2px 4px"><input style="width:100%;border:none;background:transparent;font-size:11px;padding:3px" type="text" placeholder="Raison sous-objectif..." value="${c.raison_non_atteinte||''}" onblur="sauvegarderColisLigne(${sessNum},${i},'raison_non_atteinte',this.value)" /></td></tr>`:''}`;
+            ${(c.cadence_ok===false)?`<tr style="background:var(--orange-pale)"><td colspan="7" style="padding:2px 4px"><input style="width:100%;border:none;background:transparent;font-size:11px;padding:3px" type="text" placeholder="Cause cadence NOK..." value="${c.raison_non_atteinte||''}" onblur="sauvegarderColisLigne(${sessNum},${i},'raison_non_atteinte',this.value)" /></td></tr>`:''}`;
           }).join('')}
         </tbody>
       </table>
@@ -1444,7 +1444,38 @@ async function sauvegarderColisLigne(sessNum, ligneNum, champ, valeur){
     let c = S.colisData.find(x=>(x.session_numero||1)===sessNum&&(x.ligne_numero||1)===ligneNum);
     const now = new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
     const autoHeure = (champ==='quantite_colis' && valeur && (!c||!c.heure_controle)) ? now : null;
-    const autoCadence = (champ==='quantite_colis' && valeur!=null) ? (valeur>=OBJECTIF_COLIS) : null;
+    // Calcul cadence basé sur la vitesse inter-lignes (colis/h) et non la quantité brute
+    let autoCadence = null;
+    if(champ==='quantite_colis' && valeur!=null){
+      // Chercher la ligne précédente dans la même session pour calculer la cadence réelle
+      const sessNum2 = c ? (c.session_numero||1) : sessNum;
+      const ligneNum2 = c ? (c.ligne_numero||1) : ligneNum;
+      const lignesPrecedentes = S.colisData.filter(x=>
+        (x.session_numero||1)===sessNum2 &&
+        (x.ligne_numero||1) < ligneNum2 &&
+        x.quantite_colis && x.heure_controle
+      ).sort((a,b)=>(a.ligne_numero||1)-(b.ligne_numero||1));
+      const prev = lignesPrecedentes[lignesPrecedentes.length-1];
+      if(prev && prev.heure_controle){
+        const heureActuelle = autoHeure || (c&&c.heure_controle) || now;
+        const [ph,pm] = prev.heure_controle.split(':').map(Number);
+        const [ch2,cm2] = heureActuelle.split(':').map(Number);
+        let dureeMin = (ch2*60+cm2)-(ph*60+pm);
+        if(dureeMin<=0) dureeMin+=24*60;
+        if(dureeMin>0){
+          const diffColis = valeur - prev.quantite_colis;
+          if(diffColis>0){
+            const cadenceCalc = Math.round((diffColis/dureeMin)*60);
+            autoCadence = cadenceCalc >= OBJECTIF_COLIS;
+          } else {
+            autoCadence = false;
+          }
+        }
+      } else {
+        // Première ligne de la session : pas de précédent, on ne peut pas juger
+        autoCadence = null;
+      }
+    }
 
     if(!c){
       const body = {vacation_id:S.vacationId, session_numero:sessNum, ligne_numero:ligneNum, tranche:`S${sessNum}-L${ligneNum}`, [champ]:valeur};
