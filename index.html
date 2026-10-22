@@ -112,7 +112,7 @@ let PERSONNEL_DB = {}; // { 'Matin': [{id,prenom,nom},...], 'Aprem': [...], 'Soi
 let S = {
   agent: null, vue: 'epi', loading: false,
   vacationId: null, date: getToday(),
-  controles: [], colisData: [], epiData: [], epiValide: false,
+  controles: [], colisData: [], epiData: [], anomalies: [], epiValide: false,
   epiEquipeSelectionnee: '',
   modeTest: false, sessionColis: 1,
   toutesVacations: [], adminVue: 'liste',
@@ -651,8 +651,8 @@ function render(){
   }
   
   const nav = S.agent.est_responsable
-    ? [['epi','🦺','EPI'],['chantiers','📋','Chantiers'],['colis','📦','Colis/h'],['pdf','📄','PDF'],['admin','⚙️','Admin']]
-    : [['epi','🦺','EPI'],['chantiers','📋','Chantiers'],['colis','📦','Colis/h'],['pdf','📄','PDF']];
+    ? [['epi','🦺','EPI'],['chantiers','📋','Chantiers'],['colis','📦','Colis/h'],['anomalies','⚠️','Anomalies'],['pdf','📄','PDF'],['admin','⚙️','Admin']]
+    : [['epi','🦺','EPI'],['chantiers','📋','Chantiers'],['colis','📦','Colis/h'],['anomalies','⚠️','Anomalies'],['pdf','📄','PDF']];
   
   let content = '';
   if(S.vue==='epi') content = renderEPI();
@@ -663,6 +663,7 @@ function render(){
     try{ content = renderColis(); }
     catch(e){ content = `<div class="card" style="background:#fee2e2;border:2px solid #dc2626"><div style="font-weight:700;color:#dc2626;margin-bottom:8px">❌ Erreur renderColis</div><div style="font-size:12px;font-family:monospace;white-space:pre-wrap">${e.message}\n\n${e.stack}</div></div>`; }
   }
+  else if(S.vue==='anomalies') content = renderAnomalies();
   else if(S.vue==='pdf') content = renderPDF();
   else if(S.vue==='admin') content = renderAdmin();
   
@@ -1335,7 +1336,7 @@ async function changerCode(){
 async function deconnexion(){
   arreterRappelColis();
   await supabaseAuth.auth.signOut();
-  S = {agent:null, vue:'epi', loading:false, vacationId:null, date:getToday(), controles:[], colisData:[], epiData:[], epiValide:false, tournees:[], toutesVacations:[], adminVue:'liste', modalAgent:null, tousAgents:[], authSession:null, sessionColisActive:null, archiveDate:null, archivesData:null, lignesSession:{}};
+  S = {agent:null, vue:'epi', loading:false, vacationId:null, date:getToday(), controles:[], colisData:[], epiData:[], anomalies:[], epiValide:false, tournees:[], toutesVacations:[], adminVue:'liste', modalAgent:null, tousAgents:[], authSession:null, sessionColisActive:null, archiveDate:null, archivesData:null, lignesSession:{}};
   render();
 }
 
@@ -1350,6 +1351,7 @@ async function finVacation(){
   S.controles = [];
   S.colisData = [];
   S.epiData = [];
+  S.anomalies = [];
   S.tournees = [];
   S.vue = 'epi';
   toast('✅ Vacation terminée !','ok');
@@ -1370,7 +1372,7 @@ async function changerDate(d){
 // ── CHARGEMENT ─────────────────────────────────────────────────
 async function chargerTout(){
   await getOrCreateVacation();
-  await Promise.all([chargerControles(), chargerColis(), chargerEPI(), chargerAgentsPersonnel()]);
+  await Promise.all([chargerControles(), chargerColis(), chargerEPI(), chargerAgentsPersonnel(), chargerAnomalies()]);
   if(S.agent.est_responsable) S.tousAgents = await db.get('agents','select=id,prenom,nom,equipe,email,est_responsable&order=nom.asc');
 }
 
@@ -1421,6 +1423,11 @@ async function chargerEPI(){
   S.epiData = await db.get('epi',`vacation_id=eq.${S.vacationId}&order=created_at.asc`);
   const vac = await db.get('vacations_suivi',`id=eq.${S.vacationId}&select=epi_valide`);
   S.epiValide = vac[0]?.epi_valide || false;
+}
+
+async function chargerAnomalies(){
+  if(!S.vacationId){ S.anomalies = []; return; }
+  S.anomalies = await db.get('anomalies',`vacation_id=eq.${S.vacationId}&order=created_at.asc`);
 }
 
 // ── SAUVEGARDE CONTROLES ────────────────────────────────────────
@@ -1543,6 +1550,132 @@ function renderEPIBlocage(){
   </div>`;
 }
 
+// ── ANOMALIES ───────────────────────────────────────────────────
+const TYPES_ANOMALIE = [
+  { code:'ERA',  label:'ERA — Erreur Acheminement Machine', couleur:'#dc2626', bg:'#fee2e2' },
+  { code:'PU',   label:'P.U — Pick-Up',                    couleur:'#d97706', bg:'#fef3c7' },
+  { code:'SP',   label:'So Poste — Sous Poste',            couleur:'#7c3aed', bg:'#ede9fe' },
+  { code:'MEP',  label:'Mise en Place',                    couleur:'#059669', bg:'#d1fae5' },
+  { code:'AUTRE',label:'Autre',                            couleur:'#1a56a0', bg:'#e8f0fb' },
+];
+
+const BRINS_MEP = ['Brin A','Brin B','Brin C','Brin D','Brin E','Brin F','Brin G','Brin H','Brin I','Brin Rejet','HN'];
+
+function renderAnomalies(){
+  const liste = S.anomalies || [];
+  return `<div class="card">
+    <div class="card-title">⚠️ Anomalies — ${fmtDate(S.date)}</div>
+    ${liste.length===0?`<div class="info-banner" style="text-align:center;color:var(--texte-doux)">Aucune anomalie saisie pour cette vacation.</div>`:''}
+    ${liste.map((a,idx)=>{
+      const type = TYPES_ANOMALIE.find(t=>t.code===a.type_anomalie)||TYPES_ANOMALIE[3];
+      return `<div style="border:2px solid ${type.couleur};border-radius:12px;padding:14px;margin-bottom:12px;background:${type.bg}20">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+          <span style="font-size:11px;font-weight:800;padding:4px 10px;border-radius:20px;background:${type.bg};color:${type.couleur};border:1.5px solid ${type.couleur}">${type.label}</span>
+          <button onclick="supprimerAnomalie('${a.id}')" style="padding:4px 10px;background:#fee2e2;color:#dc2626;border:1.5px solid #dc2626;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">🗑 Suppr.</button>
+        </div>
+        <div style="margin-bottom:8px">
+          <label class="form-label">Type</label>
+          <select class="form-input" onchange="modifierAnomalie('${a.id}','type_anomalie',this.value)">
+            ${TYPES_ANOMALIE.map(t=>`<option value="${t.code}" ${a.type_anomalie===t.code?'selected':''}>${t.label}</option>`).join('')}
+          </select>
+        </div>
+        <div style="margin-bottom:8px">
+          <label class="form-label">${a.type_anomalie==='MEP'?'Brin concerné':'Précision'}</label>
+          ${a.type_anomalie==='MEP'?`
+          <select class="form-input" onchange="modifierAnomalie('${a.id}','brin_mep',this.value)">
+            <option value="">— Sélectionner un brin —</option>
+            ${BRINS_MEP.map(b=>`<option value="${b}" ${a.brin_mep===b?'selected':''}>${b}</option>`).join('')}
+          </select>`:`
+          <input type="text" class="form-input" placeholder="Précision optionnelle..." value="${a.brin_mep||''}" onblur="modifierAnomalie('${a.id}','brin_mep',this.value)" />`}
+        </div>
+        <div style="margin-bottom:8px">
+          <label class="form-label">Description</label>
+          <textarea class="form-input" rows="3" placeholder="Décrivez l'anomalie..." onblur="modifierAnomalie('${a.id}','description',this.value)" style="resize:vertical">${a.description||''}</textarea>
+        </div>
+        <div>
+          <label class="form-label">Photo</label>
+          ${a.photo_base64
+            ?`<div style="position:relative;display:inline-block">
+                <img src="${a.photo_base64}" style="max-width:100%;max-height:200px;border-radius:8px;border:2px solid ${type.couleur}" />
+                <button onclick="supprimerPhotoAnomalie('${a.id}')" style="position:absolute;top:4px;right:4px;background:#dc2626;color:white;border:none;border-radius:6px;padding:3px 8px;font-size:11px;font-weight:700;cursor:pointer">✕</button>
+              </div>`
+            :`<div style="display:flex;gap:8px;flex-wrap:wrap">
+                <label style="flex:1;min-width:120px;padding:10px;background:white;border:2px dashed var(--gris-bord);border-radius:10px;text-align:center;cursor:pointer;font-size:12px;color:var(--texte-doux)">
+                  📷 Prendre une photo
+                  <input type="file" accept="image/*" capture="environment" style="display:none" onchange="ajouterPhotoAnomalie('${a.id}',this)" />
+                </label>
+                <label style="flex:1;min-width:120px;padding:10px;background:white;border:2px dashed var(--gris-bord);border-radius:10px;text-align:center;cursor:pointer;font-size:12px;color:var(--texte-doux)">
+                  🖼 Charger une photo
+                  <input type="file" accept="image/*" style="display:none" onchange="ajouterPhotoAnomalie('${a.id}',this)" />
+                </label>
+              </div>`
+          }
+        </div>
+      </div>`;
+    }).join('')}
+    <button class="btn-primary" style="background:#d97706;margin-top:4px" onclick="ajouterAnomalie()">+ Ajouter une anomalie</button>
+  </div>`;
+}
+
+async function ajouterAnomalie(){
+  try{
+    const created = await db.post('anomalies',{vacation_id:S.vacationId, type_anomalie:'ERA', description:'', photo_base64:null});
+    if(!S.anomalies) S.anomalies = [];
+    S.anomalies.push(created[0]);
+    render();
+  }catch(e){ toast('Erreur création anomalie','err'); }
+}
+
+async function supprimerAnomalie(id){
+  if(!confirm('Supprimer cette anomalie ?')) return;
+  try{
+    await db.del('anomalies',`id=eq.${id}`);
+    S.anomalies = S.anomalies.filter(a=>a.id!==id);
+    render();
+  }catch(e){ toast('Erreur suppression','err'); }
+}
+
+async function modifierAnomalie(id, champ, valeur){
+  try{
+    await db.patch('anomalies',`id=eq.${id}`,{[champ]:valeur});
+    const a = S.anomalies.find(x=>x.id===id);
+    if(a){ a[champ]=valeur; if(champ==='type_anomalie') render(); }
+  }catch(e){ toast('Erreur sauvegarde','err'); }
+}
+
+function ajouterPhotoAnomalie(id, input){
+  const file = input.files[0];
+  if(!file) return;
+  // Redimensionner avant encodage pour limiter la taille
+  const reader = new FileReader();
+  reader.onload = function(e){
+    const img = new Image();
+    img.onload = function(){
+      const canvas = document.createElement('canvas');
+      const MAX = 1200;
+      let w = img.width, h = img.height;
+      if(w > MAX){ h = Math.round(h*MAX/w); w = MAX; }
+      if(h > MAX){ w = Math.round(w*MAX/h); h = MAX; }
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      const base64 = canvas.toDataURL('image/jpeg', 0.82);
+      modifierAnomalie(id, 'photo_base64', base64);
+      const a = S.anomalies.find(x=>x.id===id);
+      if(a){ a.photo_base64 = base64; render(); }
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+async function supprimerPhotoAnomalie(id){
+  try{
+    await db.patch('anomalies',`id=eq.${id}`,{photo_base64:null});
+    const a = S.anomalies.find(x=>x.id===id);
+    if(a){ a.photo_base64=null; render(); }
+  }catch(e){ toast('Erreur suppression photo','err'); }
+}
+
 function renderPDF(){
   const moy = calcMoyenneColis();
   // Date J-1 pour le rapport de nuit (Aprem J-1 + Matin J)
@@ -1642,6 +1775,21 @@ function exporterPDF(){
     <tr style="background:#1a56a0;color:white"><th style="padding:6px">Nom + Prénom</th><th style="padding:6px">EPI manquant</th><th style="padding:6px">Solution apportée</th></tr>
     ${S.epiData.filter(e=>e.nom_prenom!=='RAS').map(e=>`<tr style="border-bottom:1px solid #eee"><td style="padding:6px">${e.nom_prenom}</td><td style="padding:6px;color:#dc2626;font-weight:bold">${e.epi_manquant}</td><td style="padding:6px">${e.solution||'—'}</td></tr>`).join('')}
   </table>`:'<p style="color:#16a34a;font-weight:bold">✅ Aucun manquement EPI ce jour.</p>'}
+
+  <h2 style="color:#d97706;font-size:14px;margin:16px 0 8px;border-left:4px solid #d97706;padding-left:8px">⚠️ Anomalies</h2>
+  ${(S.anomalies||[]).length?`
+  <table style="width:100%;border-collapse:collapse;margin-bottom:10px">
+    <tr style="background:#d97706;color:white"><th style="padding:6px">Type</th><th style="padding:6px">Brin</th><th style="padding:6px">Description</th><th style="padding:6px">Photo</th></tr>
+    ${(S.anomalies||[]).map(a=>{
+      const type=TYPES_ANOMALIE.find(t=>t.code===a.type_anomalie)||TYPES_ANOMALIE[TYPES_ANOMALIE.length-1];
+      return `<tr style="border-bottom:1px solid #eee;vertical-align:top">
+        <td style="padding:6px;font-weight:700;color:${type.couleur};white-space:nowrap">${type.label}</td>
+        <td style="padding:6px">${a.brin_mep||'—'}</td>
+        <td style="padding:6px">${a.description||'—'}</td>
+        <td style="padding:6px">${a.photo_base64?`<img src="${a.photo_base64}" style="max-width:120px;max-height:100px;border-radius:4px" />`:'—'}</td>
+      </tr>`;
+    }).join('')}
+  </table>`:'<p style="color:#16a34a;font-weight:bold">✅ Aucune anomalie signalée.</p>'}
   </div>`;
 
   // Créer une page d'impression dans l'app
@@ -1707,9 +1855,10 @@ async function exporterRapportNuit(dateAprem, dateMatin){
       const controles = await db.get('controles_chantiers',`vacation_id=eq.${v.id}&order=numero.asc`);
       const colis = await db.get('controles_colis',`vacation_id=eq.${v.id}&order=created_at.asc`);
       const epi = await db.get('epi',`vacation_id=eq.${v.id}&order=created_at.asc`);
+      const anomalies = await db.get('anomalies',`vacation_id=eq.${v.id}&order=created_at.asc`);
       const ids = controles.map(c=>c.id);
       const tournees = ids.length ? await db.get('tournees',`controle_id=in.(${ids.join(',')})&order=numero.asc`) : [];
-      return {vacation:v, agent, controles, colis, epi, tournees};
+      return {vacation:v, agent, controles, colis, epi, anomalies, tournees};
     }
 
     const detailAprem = await chargerDetails(vacsAprem);
@@ -1806,6 +1955,21 @@ async function exporterRapportNuit(dateAprem, dateMatin){
             <td style="padding:5px 6px">${e.solution||'—'}</td>
           </tr>`).join('')}
         </table>`:'<p style="color:#16a34a;font-weight:bold">✅ Aucun manquement EPI.</p>'}
+
+        <h3 style="color:#d97706;font-size:13px;margin:14px 0 8px;border-left:4px solid #d97706;padding-left:8px">⚠️ Anomalies</h3>
+        ${(d.anomalies||[]).length?`
+        <table style="width:100%;border-collapse:collapse;font-size:11px">
+          <tr style="background:#d97706;color:white"><th style="padding:5px 6px">Type</th><th style="padding:5px 6px">Brin</th><th style="padding:5px 6px">Description</th><th style="padding:5px 6px">Photo</th></tr>
+          ${(d.anomalies||[]).map(a=>{
+            const type=TYPES_ANOMALIE.find(t=>t.code===a.type_anomalie)||TYPES_ANOMALIE[TYPES_ANOMALIE.length-1];
+            return `<tr style="border-bottom:1px solid #eee;vertical-align:top">
+              <td style="padding:5px 6px;font-weight:700;color:${type.couleur};white-space:nowrap">${type.label}</td>
+              <td style="padding:5px 6px">${a.brin_mep||'—'}</td>
+              <td style="padding:5px 6px">${a.description||'—'}</td>
+              <td style="padding:5px 6px">${a.photo_base64?`<img src="${a.photo_base64}" style="max-width:100px;max-height:80px;border-radius:4px" />`:'—'}</td>
+            </tr>`;
+          }).join('')}
+        </table>`:'<p style="color:#16a34a;font-weight:bold">✅ Aucune anomalie signalée.</p>'}
       </div>`;
     }
 
@@ -1941,6 +2105,7 @@ async function verifierClotureAuto(){
     S.controles = [];
     S.colisData = [];
     S.epiData = [];
+    S.anomalies = [];
     S.tournees = [];
     S.vue = 'epi';
     render();
