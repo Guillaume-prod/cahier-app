@@ -159,11 +159,17 @@ function calcMoyenneSession(sessNum){
   // Moyenne globale pour une session (1er → dernier relevé avec heure + quantité)
   const data = S.colisData.filter(c=>c.quantite_colis&&c.heure_controle&&(c.session_numero||1)===sessNum);
   if(data.length < 2) return null;
-  const sorted = [...data].sort((a,b)=>a.heure_controle.localeCompare(b.heure_controle));
+  function toMinSess(h){ const [hh,mm]=h.split(':').map(Number); return hh*60+mm; }
+  const sorted = [...data].sort((a,b)=>{
+    let ma=toMinSess(a.heure_controle), mb=toMinSess(b.heure_controle);
+    if(ma<360 && mb>1080) ma+=1440;
+    if(mb<360 && ma>1080) mb+=1440;
+    return ma-mb;
+  });
   const first = sorted[0], last = sorted[sorted.length-1];
-  const [fh,fm] = first.heure_controle.split(':').map(Number);
-  const [lh,lm] = last.heure_controle.split(':').map(Number);
-  let dureeMin = (lh*60+lm)-(fh*60+fm);
+  let fMin = toMinSess(first.heure_controle), lMin = toMinSess(last.heure_controle);
+  if(lMin < fMin) lMin += 1440; // passage minuit
+  let dureeMin = lMin - fMin;
   if(dureeMin<=0) dureeMin+=24*60;
   const totalArret = last.arret_machine_cumul||0;
   const dureeEffective = Math.max(1, dureeMin - totalArret);
@@ -820,7 +826,13 @@ function renderColis(){
       const c = S.colisData.find(x=>(x.session_numero||1)===sessNum&&(x.ligne_numero||1)===i)||{};
       lignes.push({i, c});
     }
-    const sorted = lignes.filter(({c})=>c.quantite_colis&&c.heure_controle).map(({c})=>c).sort((a,b)=>a.heure_controle.localeCompare(b.heure_controle));
+    function toMinRender(h){ const [hh,mm]=h.split(':').map(Number); return hh*60+mm; }
+    const sorted = lignes.filter(({c})=>c.quantite_colis&&c.heure_controle).map(({c})=>c).sort((a,b)=>{
+      let ma=toMinRender(a.heure_controle), mb=toMinRender(b.heure_controle);
+      if(ma<360 && mb>1080) ma+=1440;
+      if(mb<360 && ma>1080) mb+=1440;
+      return ma-mb;
+    });
     const moyS = calcMoyenneSession(sessNum);
     const mSColor = moyS ? (moyS>=OBJECTIF_COLIS?'var(--vert)':'var(--rouge)') : 'var(--texte-doux)';
     const mSBg = moyS ? (moyS>=OBJECTIF_COLIS?'var(--vert-pale)':'var(--rouge-pale)') : 'var(--gris)';
@@ -1150,11 +1162,17 @@ function calcMoyenneColisArchive(colisData){
   const moyennes = sessions.map(sessNum=>{
     const data = colisData.filter(c=>c.quantite_colis&&c.heure_controle&&(c.session_numero||1)===sessNum);
     if(data.length<1) return null;
-    const sorted = [...data].sort((a,b)=>a.heure_controle.localeCompare(b.heure_controle));
+    function toMinArch(h){ const [hh,mm]=h.split(':').map(Number); return hh*60+mm; }
+    const sorted = [...data].sort((a,b)=>{
+      let ma=toMinArch(a.heure_controle), mb=toMinArch(b.heure_controle);
+      if(ma<360 && mb>1080) ma+=1440;
+      if(mb<360 && ma>1080) mb+=1440;
+      return ma-mb;
+    });
     const first = sorted[0], last = sorted[sorted.length-1];
-    const [fh,fm] = first.heure_controle.split(':').map(Number);
-    const [lh,lm] = last.heure_controle.split(':').map(Number);
-    let duree = (lh*60+lm)-(fh*60+fm);
+    let fMinA=toMinArch(first.heure_controle), lMinA=toMinArch(last.heure_controle);
+    if(lMinA<fMinA) lMinA+=1440;
+    let duree = lMinA - fMinA;
     if(duree<=0) duree+=24*60;
     const arret = last.arret_machine_cumul||0;
     const dureeEff = Math.max(1,duree-arret);
