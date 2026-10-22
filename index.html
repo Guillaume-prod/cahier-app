@@ -1543,6 +1543,8 @@ function renderEPIBlocage(){
 
 function renderPDF(){
   const moy = calcMoyenneColis();
+  // Date J-1 pour le rapport de nuit (Aprem J-1 + Matin J)
+  const dateAprem = S.date; // par défaut : date courante de la session
   return `<div class="card">
     <div class="card-title">📄 Export du cahier</div>
     <div class="info-banner">Génère un PDF complet du cahier de vacation pour la date sélectionnée.</div>
@@ -1554,7 +1556,18 @@ function renderPDF(){
       <div style="font-size:12px;color:${moy&&moy>=OBJECTIF_COLIS?'var(--vert)':'var(--rouge)'}">Moyenne : ${moy||'—'} colis/h</div>
       <div style="font-size:12px;color:var(--texte-doux)">EPI : ${S.epiData.filter(e=>e.nom_prenom!=='RAS').length===0?'✅ RAS':'⚠️ '+S.epiData.filter(e=>e.nom_prenom!=='RAS').length+' manquement(s)'}</div>
     </div>
-    <button class="btn-primary" onclick="exporterPDF()">🖨️ Générer le PDF</button>
+    <button class="btn-primary" onclick="exporterPDF()">🖨️ Générer mon PDF</button>
+  </div>
+
+  <div class="card" style="margin-top:14px">
+    <div class="card-title">🌙 Rapport de nuit consolidé</div>
+    <div class="info-banner">Génère un PDF regroupant l'équipe Aprem et l'équipe Matin sur une même nuit.</div>
+    <div style="margin-bottom:12px">
+      <label class="form-label">📅 Date de l'Aprem (J)</label>
+      <input class="form-input" type="date" id="date-rapport-nuit" value="${dateAprem}" />
+      <div style="font-size:11px;color:var(--texte-doux);margin-top:4px">Le Matin correspondant sera automatiquement celui du lendemain (J+1)</div>
+    </div>
+    <button class="btn-primary" style="background:#6366f1" onclick="confirmerRapportNuit()">🌙 Générer le rapport de nuit</button>
   </div>`;
 }
 
@@ -1657,6 +1670,178 @@ function fermerPDF(){
   if(overlay) overlay.remove();
   const style = document.getElementById('print-style');
   if(style) style.remove();
+}
+
+// ── RAPPORT DE NUIT CONSOLIDÉ ────────────────────────────────────
+function confirmerRapportNuit(){
+  const input = document.getElementById('date-rapport-nuit');
+  const dateAprem = input ? input.value : S.date;
+  if(!dateAprem){ toast('Sélectionne une date','err'); return; }
+
+  // Calculer J+1 pour le Matin
+  const d = new Date(dateAprem);
+  d.setDate(d.getDate()+1);
+  const dateMatin = d.toISOString().slice(0,10);
+
+  // Confirmation
+  const ok = confirm(`Générer le rapport de nuit ?\n\n🌆 Aprem du ${fmtDate(dateAprem)}\n☀️ Matin du ${fmtDate(dateMatin)}\n\nCela va charger les données depuis la base.`);
+  if(ok) exporterRapportNuit(dateAprem, dateMatin);
+}
+
+async function exporterRapportNuit(dateAprem, dateMatin){
+  toast('⏳ Chargement des données…','info');
+
+  try{
+    // Charger vacation Aprem de J
+    const vacsAprem = await db.get('vacations_suivi',`date=eq.${dateAprem}&equipe=eq.Aprem&select=*&order=created_at.asc`);
+    // Charger vacation Matin de J+1
+    const vacsMatin = await db.get('vacations_suivi',`date=eq.${dateMatin}&equipe=eq.Matin&select=*&order=created_at.asc`);
+
+    // Charger les détails de chaque vacation
+    async function chargerDetails(vacs){
+      if(!vacs.length) return null;
+      const v = vacs[0]; // On prend la première (en cas de doublon)
+      const agent = (S.tousAgents||[]).find(a=>a.id===v.agent_id)||{prenom:'?',nom:'',equipe:v.equipe||''};
+      const controles = await db.get('controles_chantiers',`vacation_id=eq.${v.id}&order=numero.asc`);
+      const colis = await db.get('controles_colis',`vacation_id=eq.${v.id}&order=created_at.asc`);
+      const epi = await db.get('epi',`vacation_id=eq.${v.id}&order=created_at.asc`);
+      const ids = controles.map(c=>c.id);
+      const tournees = ids.length ? await db.get('tournees',`controle_id=in.(${ids.join(',')})&order=numero.asc`) : [];
+      return {vacation:v, agent, controles, colis, epi, tournees};
+    }
+
+    const detailAprem = await chargerDetails(vacsAprem);
+    const detailMatin = await chargerDetails(vacsMatin);
+
+    if(!detailAprem && !detailMatin){
+      toast('Aucune vacation trouvée pour ces dates','err');
+      return;
+    }
+
+    // Générer le HTML de chaque section
+    function htmlVacation(d, label, emoji, dateStr){
+      if(!d) return `<div style="page-break-before:always;padding:20px;font-family:Arial,sans-serif;font-size:12px">
+        <h2 style="color:#6b7280">${emoji} ${label} — ${dateStr}</h2>
+        <p style="color:#9ca3af;margin-top:12px">Aucune donnée saisie pour cette vacation.</p>
+      </div>`;
+
+      function toMinN(h){ const [hh,mm]=h.split(':').map(Number); return hh*60+mm; }
+      // Calcul moyenne colis
+      const sessions = [...new Set(d.colis.map(c=>c.session_numero||1))];
+      const moyennes = sessions.map(sessNum=>{
+        const data = d.colis.filter(c=>c.quantite_colis&&c.heure_controle&&(c.session_numero||1)===sessNum);
+        if(data.length<2) return null;
+        const sorted2 = [...data].sort((a,b)=>{
+          let ma=toMinN(a.heure_controle),mb=toMinN(b.heure_controle);
+          if(ma<360&&mb>1080)ma+=1440; if(mb<360&&ma>1080)mb+=1440;
+          return ma-mb;
+        });
+        const first=sorted2[0],last=sorted2[sorted2.length-1];
+        let fM=toMinN(first.heure_controle),lM=toMinN(last.heure_controle);
+        if(lM<fM)lM+=1440;
+        const duree=Math.max(1,lM-fM-(last.arret_machine_cumul||0));
+        const total=last.quantite_colis-first.quantite_colis;
+        return total>0?Math.round((total/duree)*60):Math.round((last.quantite_colis/duree)*60);
+      }).filter(m=>m!==null);
+      const moy = moyennes.length?Math.round(moyennes.reduce((a,b)=>a+b,0)/moyennes.length):null;
+      const moyOk = moy && moy >= OBJECTIF_COLIS;
+
+      return `<div style="font-family:Arial,sans-serif;padding:20px;max-width:800px;margin:0 auto;font-size:12px">
+        <div style="display:flex;align-items:center;gap:12px;border-bottom:3px solid #1a56a0;padding-bottom:10px;margin-bottom:14px">
+          <span style="font-size:28px">${emoji}</span>
+          <div>
+            <h2 style="color:#1a56a0;font-size:16px;margin:0">${label} — ${dateStr}</h2>
+            <p style="color:#5a6478;font-size:11px;margin:2px 0 0">Chef d'équipe : ${d.agent.prenom} ${d.agent.nom} · Equipe ${d.vacation.equipe||label}</p>
+          </div>
+          ${moy?`<div style="margin-left:auto;padding:6px 14px;border-radius:8px;font-weight:700;font-size:13px;background:${moyOk?'#dcfce7':'#fee2e2'};color:${moyOk?'#16a34a':'#dc2626'}">${moy} colis/h ${moyOk?'✅':'❌'}</div>`:''}
+        </div>
+
+        <h3 style="color:#1a56a0;font-size:13px;margin:14px 0 8px;border-left:4px solid #1a56a0;padding-left:8px">📦 Relevés Colis/H — Objectif ${OBJECTIF_COLIS} colis/h</h3>
+        ${d.colis.filter(c=>c.quantite_colis).length?`
+        <table style="width:100%;border-collapse:collapse;margin-bottom:10px;font-size:11px">
+          <tr style="background:#1a56a0;color:white">
+            <th style="padding:5px 6px">Session</th><th style="padding:5px 6px">Ligne</th>
+            <th style="padding:5px 6px">Camion</th><th style="padding:5px 6px">H relevé</th>
+            <th style="padding:5px 6px">Quantité</th><th style="padding:5px 6px">Cadence</th>
+            <th style="padding:5px 6px">Raison NOK</th>
+          </tr>
+          ${d.colis.filter(c=>c.quantite_colis).map(c=>`
+          <tr style="border-bottom:1px solid #eee">
+            <td style="padding:5px 6px;text-align:center">${c.session_numero||1}</td>
+            <td style="padding:5px 6px;text-align:center">${c.ligne_numero||1}</td>
+            <td style="padding:5px 6px">${c.camion_h_debut||'—'}</td>
+            <td style="padding:5px 6px">${c.heure_controle||'—'}</td>
+            <td style="padding:5px 6px;font-weight:bold;text-align:center">${c.quantite_colis}</td>
+            <td style="padding:5px 6px;text-align:center;color:${c.cadence_ok!==false?'#16a34a':'#dc2626'};font-weight:bold">${c.cadence_ok!==false?'✅ OK':'❌ NOK'}</td>
+            <td style="padding:5px 6px;color:#dc2626">${c.cadence_ok===false&&c.raison_non_atteinte?c.raison_non_atteinte:'—'}</td>
+          </tr>`).join('')}
+        </table>`:'<p style="color:#9ca3af">Aucune donnée colis saisie.</p>'}
+
+        <h3 style="color:#1a56a0;font-size:13px;margin:14px 0 8px;border-left:4px solid #1a56a0;padding-left:8px">📋 Vérification des Chantiers</h3>
+        ${d.controles.length?d.controles.map(c=>{
+          const trn=(d.tournees||[]).filter(t=>t.controle_id===c.id);
+          return `<div style="background:#f4f6f9;padding:8px 10px;border-radius:6px;margin-bottom:8px">
+            <strong>Contrôle N°${c.numero}</strong> — Brin: ${c.brin||'—'} — Heure: ${c.heure_controle||'—'} — Agents: ${c.noms_chantier||'—'}
+            ${trn.length?`<table style="width:100%;border-collapse:collapse;margin-top:6px;font-size:11px">
+              <tr style="background:#1a56a0;color:white"><th style="padding:4px 6px">N°</th><th style="padding:4px 6px">Contenant</th><th style="padding:4px 6px">Résultat</th><th style="padding:4px 6px">Erreurs</th><th style="padding:4px 6px">Solutions</th></tr>
+              ${trn.map(t=>`<tr style="border-bottom:1px solid #eee">
+                <td style="padding:4px 6px">${t.numero}</td><td style="padding:4px 6px">${t.contenant||'—'}</td>
+                <td style="padding:4px 6px;color:${t.resultat==='OK'?'#16a34a':'#dc2626'};font-weight:bold">${t.resultat||'—'}</td>
+                <td style="padding:4px 6px">${t.erreurs||'—'}</td><td style="padding:4px 6px">${t.solutions||'—'}</td>
+              </tr>`).join('')}
+            </table>`:'<p style="font-size:11px;color:#9ca3af;margin-top:4px">Aucune tournée saisie.</p>'}
+          </div>`;
+        }).join(''):'<p style="color:#9ca3af">Aucun contrôle chantier saisi.</p>'}
+
+        <h3 style="color:#1a56a0;font-size:13px;margin:14px 0 8px;border-left:4px solid #1a56a0;padding-left:8px">🦺 Contrôle EPI</h3>
+        ${d.epi.filter(e=>e.nom_prenom&&e.nom_prenom!=='RAS').length?`
+        <table style="width:100%;border-collapse:collapse;font-size:11px">
+          <tr style="background:#1a56a0;color:white"><th style="padding:5px 6px">Nom + Prénom</th><th style="padding:5px 6px">EPI manquant</th><th style="padding:5px 6px">Solution apportée</th></tr>
+          ${d.epi.filter(e=>e.nom_prenom&&e.nom_prenom!=='RAS').map(e=>`
+          <tr style="border-bottom:1px solid #eee">
+            <td style="padding:5px 6px">${e.nom_prenom}</td>
+            <td style="padding:5px 6px;color:#dc2626;font-weight:bold">${e.epi_manquant||'—'}</td>
+            <td style="padding:5px 6px">${e.solution||'—'}</td>
+          </tr>`).join('')}
+        </table>`:'<p style="color:#16a34a;font-weight:bold">✅ Aucun manquement EPI.</p>'}
+      </div>`;
+    }
+
+    const contenu = `
+      <div style="font-family:Arial,sans-serif;padding:20px;max-width:800px;margin:0 auto">
+        <div style="text-align:center;border-bottom:3px solid #1a56a0;padding-bottom:12px;margin-bottom:4px">
+          <h1 style="color:#1a56a0;font-size:20px;margin:0">🌙 Rapport de Nuit — La Poste Mulhouse</h1>
+          <p style="color:#5a6478;font-size:12px;margin:4px 0 0">🌆 Aprem ${fmtDate(dateAprem)} → ☀️ Matin ${fmtDate(dateMatin)}</p>
+        </div>
+      </div>
+      ${htmlVacation(detailAprem, 'Équipe Aprem', '🌆', fmtDate(dateAprem))}
+      <div style="page-break-before:always"></div>
+      ${htmlVacation(detailMatin, 'Équipe Matin', '☀️', fmtDate(dateMatin))}
+    `;
+
+    const overlay = document.createElement('div');
+    overlay.id = 'pdf-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:white;z-index:999;overflow-y:auto;padding:0';
+    overlay.innerHTML = `
+      <div style="position:sticky;top:0;background:#6366f1;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;z-index:10">
+        <span style="color:white;font-weight:700;font-size:15px">🌙 Rapport de nuit</span>
+        <div style="display:flex;gap:8px">
+          <button onclick="window.print()" style="padding:8px 16px;background:white;color:#6366f1;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">🖨️ Imprimer</button>
+          <button onclick="fermerPDF()" style="padding:8px 14px;background:rgba(255,255,255,0.2);color:white;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">✕ Fermer</button>
+        </div>
+      </div>
+      <div id="pdf-content">${contenu}</div>
+    `;
+    document.body.appendChild(overlay);
+
+    const style = document.createElement('style');
+    style.id = 'print-style';
+    style.textContent = `@media print { body > *:not(#pdf-overlay) { display:none !important; } #pdf-overlay > div:first-child { display:none !important; } #pdf-overlay { position:static !important; } @page { margin: 1.5cm; } }`;
+    document.head.appendChild(style);
+
+  }catch(e){
+    toast('Erreur lors du chargement : '+e.message,'err');
+  }
 }
 
 render();
