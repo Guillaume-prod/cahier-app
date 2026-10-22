@@ -1139,7 +1139,7 @@ async function supprimerAgent(id){
 async function chargerArchives(date){
   S.archiveDate = date;
   // Charger toutes les vacations terminées de cette date
-  const vacs = await db.get('vacations_suivi',`date=eq.${date}&terminee=eq.true&select=*&order=created_at.asc`);
+  const vacs = await db.get('vacations_suivi',`date=eq.${date}&select=*&order=created_at.asc`);
   if(!vacs.length){ S.archivesData = []; render(); return; }
 
   // Pour chaque vacation, charger contrôles, colis, EPI
@@ -1306,6 +1306,7 @@ async function connexion(){
     render();
     await demanderPermissionNotif();
     demarrerRappelColis();
+    demarrerClotureAuto();
   }catch(e){ toast('Erreur connexion','err'); console.error(e); }
 }
 
@@ -1341,6 +1342,7 @@ async function deconnexion(){
 async function finVacation(){
   if(!confirm('Terminer cette vacation ?')) return;
   arreterRappelColis();
+  if(clotureAutoInterval){ clearInterval(clotureAutoInterval); clotureAutoInterval=null; }
   // Marquer la vacation comme terminée en base
   try{ if(S.vacationId) await db.patch('vacations_suivi',`id=eq.${S.vacationId}`,{terminee:true}); }catch(e){}
   S.vacationId = null;
@@ -1692,10 +1694,10 @@ async function exporterRapportNuit(dateAprem, dateMatin){
   toast('⏳ Chargement des données…','info');
 
   try{
-    // Charger vacation Aprem de J
-    const vacsAprem = await db.get('vacations_suivi',`date=eq.${dateAprem}&equipe=eq.Aprem&select=*&order=created_at.asc`);
-    // Charger vacation Matin de J+1
-    const vacsMatin = await db.get('vacations_suivi',`date=eq.${dateMatin}&equipe=eq.Matin&select=*&order=created_at.asc`);
+    // Charger vacation Aprem de J (terminée ou non)
+    const vacsAprem = await db.get('vacations_suivi',`date=eq.${dateAprem}&equipe=eq.Aprem&select=*&order=created_at.desc`);
+    // Charger vacation Matin de J+1 (terminée ou non)
+    const vacsMatin = await db.get('vacations_suivi',`date=eq.${dateMatin}&equipe=eq.Matin&select=*&order=created_at.desc`);
 
     // Charger les détails de chaque vacation
     async function chargerDetails(vacs){
@@ -1894,6 +1896,57 @@ function envoyerNotif(titre, corps){
     render();
     notif.close();
   };
+}
+
+// ── CLÔTURE AUTOMATIQUE ─────────────────────────────────────────
+// Aprem → clôture à 01h00 / Matin → clôture à 08h00
+let clotureAutoInterval = null;
+
+function demarrerClotureAuto(){
+  if(clotureAutoInterval) clearInterval(clotureAutoInterval);
+  clotureAutoInterval = setInterval(verifierClotureAuto, 60*1000); // vérifie chaque minute
+  verifierClotureAuto(); // vérification immédiate au démarrage
+}
+
+async function verifierClotureAuto(){
+  if(!S.vacationId || !S.agent) return;
+  const equipe = S.agent.equipe;
+  if(!equipe) return;
+
+  const now = new Date();
+  const h = now.getHours();
+  const m = now.getMinutes();
+  const totalMin = h*60+m;
+
+  // Seuils de clôture automatique
+  // Aprem : clôture auto à 01h00 (si pas encore clôturée manuellement)
+  // Matin : clôture auto à 08h00 (si pas encore clôturée manuellement)
+  let doitClore = false;
+  if(equipe === 'Aprem' && totalMin >= 60)  doitClore = true; // dès 01h00
+  if(equipe === 'Matin' && totalMin >= 480) doitClore = true; // dès 08h00
+
+  if(!doitClore) return;
+
+  // Clôture automatique silencieuse
+  console.log(`[ClôtureAuto] ${equipe} — ${h}h${String(m).padStart(2,'0')} → clôture automatique`);
+  try{
+    await db.patch('vacations_suivi',`id=eq.${S.vacationId}`,{terminee:true});
+    clearInterval(clotureAutoInterval);
+    clotureAutoInterval = null;
+    arreterRappelColis();
+    toast(`⏰ Vacation ${equipe} clôturée automatiquement (${h}h${String(m).padStart(2,'0')})`, 'ok');
+    // Réinitialiser l'état local
+    S.vacationId = null;
+    S.epiValide = false;
+    S.controles = [];
+    S.colisData = [];
+    S.epiData = [];
+    S.tournees = [];
+    S.vue = 'epi';
+    render();
+  }catch(e){
+    console.error('[ClôtureAuto] Erreur:', e);
+  }
 }
 
 let rappelColisInterval = null;
