@@ -1,4 +1,4 @@
-const CACHE_NAME = 'cahier-mlh-v15'; // Incrémenter cette version force le rechargement
+const CACHE_NAME = 'cahier-mlh-v17'; // Incrémenter cette version force le rechargement
 const urlsToCache = [
   '/cahier-app/',
   '/cahier-app/index.html',
