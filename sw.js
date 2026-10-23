@@ -1,4 +1,4 @@
-const CACHE_NAME = 'cahier-mlh-v17'; // Incrémenter cette version force le rechargement
+const CACHE_NAME = 'cahier-mlh-v18'; // Incrémenter cette version force le rechargement
 const urlsToCache = [
   '/cahier-app/',
   '/cahier-app/index.html',
@@ -52,5 +52,16 @@ self.addEventListener('fetch', e => {
       }
       return res;
     }).catch(() => caches.match(e.request))
+  );
+});
+
+// Clic sur une notification : ouvrir / ramener l'application au premier plan sur l'onglet Colis
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  e.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(cs => {
+      for (const c of cs) { if ('focus' in c) return c.focus(); }
+      return self.clients.openWindow('/cahier-app/');
+    })
   );
 });
