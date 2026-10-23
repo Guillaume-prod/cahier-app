@@ -97,6 +97,7 @@ select.form-input{cursor:pointer;}
 <div id="app"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 <script>
 const SUPABASE_URL = 'https://cogducsipchjuxsafuqv.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_qDyP53AXFSqqLghWV70FNw_wSreDYSz';
@@ -122,7 +123,10 @@ let S = {
 
 // ── DB ──────────────────────────────────────────────────────────
 async function sbFetch(method, path, body){
-  const opts = {method, headers:{'apikey':SUPABASE_KEY,'Authorization':`Bearer ${SUPABASE_KEY}`,'Content-Type':'application/json','Prefer':'return=representation'}};
+  // Jeton de l'utilisateur connecté (renouvelé automatiquement) ; sinon clé publique (avant connexion)
+  let token = SUPABASE_KEY;
+  try{ const { data } = await supabaseAuth.auth.getSession(); if(data && data.session) token = data.session.access_token; }catch(e){}
+  const opts = {method, headers:{'apikey':SUPABASE_KEY,'Authorization':`Bearer ${token}`,'Content-Type':'application/json','Prefer':'return=representation'}};
   if(body) opts.body = JSON.stringify(body);
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, opts);
   const t = await res.text();
@@ -651,8 +655,8 @@ function render(){
   }
   
   const nav = S.agent.est_responsable
-    ? [['epi','🦺','EPI'],['chantiers','📋','Chantiers'],['colis','📦','Colis/h'],['anomalies','⚠️','Anomalies'],['pdf','📄','PDF'],['admin','⚙️','Admin']]
-    : [['epi','🦺','EPI'],['chantiers','📋','Chantiers'],['colis','📦','Colis/h'],['anomalies','⚠️','Anomalies'],['pdf','📄','PDF']];
+    ? [['epi','🦺','EPI'],['chantiers','📋','Chantiers'],['colis','📦','Colis/h'],['anomalies','⚠️','Anomalies'],['pdf','📄','PDF'],['semaine','📊','Semaine'],['admin','⚙️','Admin']]
+    : [['epi','🦺','EPI'],['chantiers','📋','Chantiers'],['colis','📦','Colis/h'],['anomalies','⚠️','Anomalies'],['pdf','📄','PDF']].concat(S.agent.equipe==='Matin'?[['semaine','📊','Semaine']]:[]);
   
   let content = '';
   if(S.vue==='epi') content = renderEPI();
@@ -665,6 +669,7 @@ function render(){
   }
   else if(S.vue==='anomalies') content = renderAnomalies();
   else if(S.vue==='pdf') content = renderPDF();
+  else if(S.vue==='semaine') content = renderSemaine();
   else if(S.vue==='admin') content = renderAdmin();
   
   app.innerHTML = `
@@ -1257,6 +1262,7 @@ function exporterPDFArchive(index){
     <div style="position:sticky;top:0;background:#1a56a0;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;z-index:10">
       <span style="color:white;font-weight:700;font-size:15px">📄 Archive — ${d.agent.prenom} ${d.agent.nom}</span>
       <div style="display:flex;gap:8px">
+        <button onclick="partagerPDF()" style="padding:8px 16px;background:#16a34a;color:white;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">📤 Partager</button>
         <button onclick="window.print()" style="padding:8px 16px;background:white;color:#1a56a0;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">🖨️ Imprimer</button>
         <button onclick="fermerPDF()" style="padding:8px 14px;background:rgba(255,255,255,0.2);color:white;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">✕ Fermer</button>
       </div>
@@ -1285,16 +1291,19 @@ async function connexion(){
   if(!prenom||!mdp){ document.getElementById('login-error').style.display='block'; return; }
   try{
     // Trouver l'email correspondant au prénom dans la table agents
-    const agentRes = await db.get('agents',`prenom=ilike.${encodeURIComponent(prenom)}&select=*`);
-    if(!agentRes.length){ document.getElementById('login-error').style.display='block'; return; }
-    const agentData = agentRes[0];
-    if(!agentData.email){ document.getElementById('login-error').style.display='block'; return; }
+    // Avant connexion, seule la fonction email_pour_prenom est accessible (la table agents est protégée)
+    const emailTrouve = await sbFetch('POST','rpc/email_pour_prenom',{p_prenom:prenom});
+    if(!emailTrouve){ document.getElementById('login-error').style.display='block'; return; }
     // Connexion via Supabase Auth
     const { data, error } = await supabaseAuth.auth.signInWithPassword({
-      email: agentData.email,
+      email: emailTrouve,
       password: mdp
     });
     if(error){ document.getElementById('login-error').style.display='block'; return; }
+    // Une fois connecté, on lit la fiche de l'agent normalement
+    const agentRes = await db.get('agents',`email=eq.${encodeURIComponent(emailTrouve)}&select=*`);
+    if(!agentRes.length){ document.getElementById('login-error').style.display='block'; return; }
+    const agentData = agentRes[0];
     S.agent = agentData;
     S.authSession = data.session;
     S.loading = true; render();
@@ -1738,6 +1747,141 @@ async function modifierEPI(id, champ, valeur){
   }catch(e){ toast('Erreur','err'); }
 }
 
+
+// ── PARTAGE PDF + RÉCAP SEMAINE ────────────────────────────────
+function escHtml(t){ return String(t==null?'':t).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function nomFichierPDF(){
+  const eq = (S.agent && S.agent.equipe) ? S.agent.equipe : 'Cahier';
+  return `Cahier_${eq}_${(S.date||'').replace(/[^0-9-]/g,'')||'jour'}.pdf`;
+}
+async function partagerPDF(nom){
+  const el = document.getElementById('pdf-content');
+  if(!el) return;
+  nom = (typeof nom==='string' && nom) ? nom : (window._nomPdfPartage || nomFichierPDF());
+  if(typeof html2pdf==='undefined'){ toast('Module PDF non chargé (vérifiez la connexion)','err'); return; }
+  toast('Préparation du PDF…','ok');
+  try{
+    const blob = await html2pdf().set({
+      margin:8, filename:nom, image:{type:'jpeg',quality:0.85},
+      html2canvas:{scale:1.5,useCORS:true}, jsPDF:{unit:'mm',format:'a4',orientation:'portrait'},
+      pagebreak:{mode:['css','legacy']}
+    }).from(el).outputPdf('blob');
+    const file = new File([blob], nom, {type:'application/pdf'});
+    if(navigator.canShare && navigator.canShare({files:[file]})){
+      await navigator.share({files:[file], title:nom.replace('.pdf',''), text:'La Poste Mulhouse — '+nom.replace('.pdf','').replace(/_/g,' ')});
+    } else {
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = nom;
+      document.body.appendChild(a); a.click(); a.remove();
+      toast('PDF téléchargé','ok');
+    }
+  }catch(e){
+    if(e && e.name==='AbortError') return;
+    toast('Erreur lors de la création du PDF','err'); console.error(e);
+  }
+}
+function lundiDe(d){ const x=new Date(d); const j=(x.getDay()+6)%7; x.setDate(x.getDate()-j); return x; }
+function isoLocal(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+
+function renderSemaine(){
+  const lun = lundiDe(new Date(S.date||getToday()));
+  return `<div class="card">
+    <div class="card-title">📊 Récapitulatif de la semaine</div>
+    <div class="info-banner">À générer le samedi matin, en fin de vacation. Résume toutes les équipes du lundi au samedi : colis/h, anomalies, EPI. Le PDF se partage directement par mail.</div>
+    <div class="form-group"><label class="form-label">Semaine du lundi</label>
+      <input type="date" class="form-input" id="sem-lundi" value="${isoLocal(lun)}" /></div>
+    <button class="btn-primary" onclick="genererRecapSemaine()">📊 Générer le récap de la semaine</button>
+  </div>`;
+}
+
+async function genererRecapSemaine(){
+  const val = document.getElementById('sem-lundi')?.value;
+  if(!val) return toast('Choisissez une date','err');
+  const lun = lundiDe(new Date(val)); const dim = new Date(lun); dim.setDate(dim.getDate()+6);
+  const from = isoLocal(lun), to = isoLocal(dim);
+  toast('Chargement de la semaine…','ok');
+  try{
+    const vacs = await db.get('vacations_suivi',`date=gte.${from}&date=lte.${to}&select=*&order=date.asc`);
+    if(!vacs.length){ toast('Aucune vacation cette semaine','err'); return; }
+    const ids = vacs.map(v=>v.id).join(',');
+    const [colis, epi, anos, ctrl, agents] = await Promise.all([
+      db.get('controles_colis',`vacation_id=in.(${ids})&order=created_at.asc`),
+      db.get('epi',`vacation_id=in.(${ids})&order=created_at.asc`),
+      db.get('anomalies',`vacation_id=in.(${ids})&order=created_at.asc`),
+      db.get('controles_chantiers',`vacation_id=in.(${ids})&select=id,vacation_id`),
+      db.get('agents',`id=in.(${[...new Set(vacs.map(v=>v.agent_id))].join(',')})&select=id,prenom,nom`)
+    ]);
+    const parVac = vacs.map(v=>{
+      const c = colis.filter(x=>x.vacation_id===v.id);
+      const moy = c.length ? calcMoyenneColisArchive(c) : null;
+      const ag = agents.find(a=>a.id===v.agent_id);
+      return {v, moy, ag: ag?ag.prenom+' '+ag.nom:'—',
+              nbAno: anos.filter(x=>x.vacation_id===v.id).length,
+              nbEpi: epi.filter(x=>x.vacation_id===v.id && x.nom_prenom!=='RAS').length,
+              nbCtrl: ctrl.filter(x=>x.vacation_id===v.id).length};
+    });
+    const moyennes = parVac.map(x=>x.moy).filter(m=>m!=null && !isNaN(m));
+    const moyGlobale = moyennes.length ? Math.round(moyennes.reduce((a,b)=>a+b,0)/moyennes.length) : null;
+    const parType = TYPES_ANOMALIE.map(t=>({t, n: anos.filter(a=>a.type_anomalie===t.code).length}));
+    const epiManq = epi.filter(x=>x.nom_prenom!=='RAS');
+    const fmtJ = d=>new Date(d).toLocaleDateString('fr-FR',{weekday:'short',day:'2-digit',month:'2-digit'});
+    const th = 'padding:6px;text-align:left';
+    const contenu = `
+    <div style="font-family:Arial,sans-serif;padding:20px;max-width:800px;margin:0 auto;font-size:12px">
+      <h1 style="color:#1a56a0;border-bottom:3px solid #1a56a0;padding-bottom:8px;font-size:18px">📊 Récapitulatif de la semaine — La Poste Mulhouse</h1>
+      <p><strong>Semaine du</strong> ${fmtJ(from)} <strong>au</strong> ${fmtJ(to)} | <strong>Établi par :</strong> ${escHtml(S.agent.prenom+' '+S.agent.nom)}</p>
+      <table style="width:100%;border-collapse:collapse;margin:12px 0"><tr>
+        <td style="padding:10px;background:#f4f6f9;border-radius:6px;text-align:center"><div style="font-size:20px;font-weight:bold">${vacs.length}</div>vacations</td>
+        <td style="padding:10px;background:${moyGlobale&&moyGlobale>=OBJECTIF_COLIS?'#dcfce7':'#fee2e2'};text-align:center"><div style="font-size:20px;font-weight:bold">${moyGlobale||'—'}</div>colis/h moyen (objectif ${OBJECTIF_COLIS})</td>
+        <td style="padding:10px;background:#fef3c7;text-align:center"><div style="font-size:20px;font-weight:bold">${anos.length}</div>anomalies</td>
+        <td style="padding:10px;background:#f4f6f9;text-align:center"><div style="font-size:20px;font-weight:bold">${epiManq.length}</div>manquement(s) EPI</td>
+      </tr></table>
+
+      <h2 style="color:#1a56a0;font-size:14px;margin:16px 0 8px;border-left:4px solid #1a56a0;padding-left:8px">Vacation par vacation</h2>
+      <table style="width:100%;border-collapse:collapse">
+        <tr style="background:#1a56a0;color:white"><th style="${th}">Jour</th><th style="${th}">Équipe</th><th style="${th}">Saisi par</th><th style="${th}">Colis/h</th><th style="${th}">Anomalies</th><th style="${th}">EPI</th></tr>
+        ${parVac.map(x=>`<tr style="border-bottom:1px solid #eee"><td style="padding:6px">${fmtJ(x.v.date)}</td><td style="padding:6px">${escHtml(x.v.equipe||'—')}</td><td style="padding:6px">${escHtml(x.ag)}</td>
+          <td style="padding:6px;font-weight:bold;color:${x.moy!=null&&x.moy>=OBJECTIF_COLIS?'#16a34a':'#dc2626'}">${x.moy!=null?x.moy:'—'}</td>
+          <td style="padding:6px">${x.nbAno||'—'}</td><td style="padding:6px">${x.nbEpi||'—'}</td></tr>`).join('')}
+      </table>
+
+      <h2 style="color:#d97706;font-size:14px;margin:16px 0 8px;border-left:4px solid #d97706;padding-left:8px">⚠️ Anomalies de la semaine (${anos.length})</h2>
+      ${anos.length?`
+      <p>${parType.filter(x=>x.n).map(x=>`<span style="display:inline-block;margin-right:12px;font-weight:bold;color:${x.t.couleur}">${escHtml(x.t.label)} : ${x.n}</span>`).join('')}</p>
+      <table style="width:100%;border-collapse:collapse">
+        <tr style="background:#d97706;color:white"><th style="${th}">Jour</th><th style="${th}">Équipe</th><th style="${th}">Type</th><th style="${th}">Précision</th><th style="${th}">Description</th><th style="${th}">Photo</th></tr>
+        ${anos.map(a=>{ const v=vacs.find(z=>z.id===a.vacation_id)||{}; const t=TYPES_ANOMALIE.find(z=>z.code===a.type_anomalie)||TYPES_ANOMALIE[TYPES_ANOMALIE.length-1];
+          return `<tr style="border-bottom:1px solid #eee;vertical-align:top"><td style="padding:6px;white-space:nowrap">${v.date?fmtJ(v.date):'—'}</td><td style="padding:6px">${escHtml(v.equipe||'—')}</td>
+          <td style="padding:6px;font-weight:700;color:${t.couleur}">${escHtml(t.label)}</td><td style="padding:6px">${escHtml(a.brin_mep||'—')}</td><td style="padding:6px">${escHtml(a.description||'—')}</td>
+          <td style="padding:6px">${a.photo_base64?`<img src="${a.photo_base64}" style="max-width:110px;max-height:90px;border-radius:4px" />`:'—'}</td></tr>`; }).join('')}
+      </table>`:'<p style="color:#16a34a;font-weight:bold">✅ Aucune anomalie signalée cette semaine.</p>'}
+
+      <h2 style="color:#1a56a0;font-size:14px;margin:16px 0 8px;border-left:4px solid #1a56a0;padding-left:8px">🦺 EPI</h2>
+      ${epiManq.length?`<table style="width:100%;border-collapse:collapse"><tr style="background:#1a56a0;color:white"><th style="${th}">Jour</th><th style="${th}">Nom</th><th style="${th}">EPI manquant</th><th style="${th}">Solution</th></tr>
+        ${epiManq.map(e=>{ const v=vacs.find(z=>z.id===e.vacation_id)||{}; return `<tr style="border-bottom:1px solid #eee"><td style="padding:6px">${v.date?fmtJ(v.date):'—'}</td><td style="padding:6px">${escHtml(e.nom_prenom)}</td><td style="padding:6px;color:#dc2626;font-weight:bold">${escHtml(e.epi_manquant)}</td><td style="padding:6px">${escHtml(e.solution||'—')}</td></tr>`; }).join('')}</table>`
+        :'<p style="color:#16a34a;font-weight:bold">✅ Aucun manquement EPI cette semaine.</p>'}
+    </div>`;
+    window._nomPdfPartage = `Recap_semaine_${from}.pdf`;
+    const overlay = document.createElement('div');
+    overlay.id = 'pdf-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:white;z-index:999;overflow-y:auto;padding:0';
+    overlay.innerHTML = `
+      <div style="position:sticky;top:0;background:#1a56a0;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;z-index:10">
+        <span style="color:white;font-weight:700;font-size:15px">📊 Récap semaine</span>
+        <div style="display:flex;gap:8px">
+          <button onclick="partagerPDF()" style="padding:8px 16px;background:#16a34a;color:white;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">📤 Partager</button>
+          <button onclick="window.print()" style="padding:8px 16px;background:white;color:#1a56a0;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">🖨️ Imprimer</button>
+          <button onclick="fermerPDF()" style="padding:8px 14px;background:rgba(255,255,255,0.2);color:white;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">✕ Fermer</button>
+        </div>
+      </div>
+      <div id="pdf-content">${contenu}</div>`;
+    document.body.appendChild(overlay);
+    const style = document.createElement('style');
+    style.id = 'print-style';
+    style.textContent = `@media print { body > *:not(#pdf-overlay) { display:none !important; } #pdf-overlay > div:first-child { display:none !important; } #pdf-overlay { position:static !important; } }`;
+    document.head.appendChild(style);
+  }catch(e){ toast('Erreur chargement semaine','err'); console.error(e); }
+}
+
 // ── EXPORT PDF ─────────────────────────────────────────────────
 function exporterPDF(){
   const moy = calcMoyenneColis();
@@ -1800,6 +1944,7 @@ function exporterPDF(){
     <div style="position:sticky;top:0;background:#1a56a0;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;z-index:10">
       <span style="color:white;font-weight:700;font-size:15px">📄 Aperçu PDF</span>
       <div style="display:flex;gap:8px">
+        <button onclick="partagerPDF()" style="padding:8px 16px;background:#16a34a;color:white;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">📤 Partager</button>
         <button onclick="window.print()" style="padding:8px 16px;background:white;color:#1a56a0;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">🖨️ Imprimer</button>
         <button onclick="fermerPDF()" style="padding:8px 14px;background:rgba(255,255,255,0.2);color:white;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">✕ Fermer</button>
       </div>
@@ -1816,6 +1961,7 @@ function exporterPDF(){
 }
 
 function fermerPDF(){
+  window._nomPdfPartage = null;
   const overlay = document.getElementById('pdf-overlay');
   if(overlay) overlay.remove();
   const style = document.getElementById('print-style');
@@ -1992,7 +2138,8 @@ async function exporterRapportNuit(dateAprem, dateMatin){
       <div style="position:sticky;top:0;background:#6366f1;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;z-index:10">
         <span style="color:white;font-weight:700;font-size:15px">🌙 Rapport de nuit</span>
         <div style="display:flex;gap:8px">
-          <button onclick="window.print()" style="padding:8px 16px;background:white;color:#6366f1;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">🖨️ Imprimer</button>
+          <button onclick="partagerPDF()" style="padding:8px 16px;background:#16a34a;color:white;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">📤 Partager</button>
+        <button onclick="window.print()" style="padding:8px 16px;background:white;color:#6366f1;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">🖨️ Imprimer</button>
           <button onclick="fermerPDF()" style="padding:8px 14px;background:rgba(255,255,255,0.2);color:white;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">✕ Fermer</button>
         </div>
       </div>
