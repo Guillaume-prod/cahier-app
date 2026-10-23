@@ -659,7 +659,8 @@ function render(){
     : [['epi','🦺','EPI'],['chantiers','📋','Chantiers'],['colis','📦','Colis/h'],['anomalies','⚠️','Anomalies'],['pdf','📄','PDF']].concat(S.agent.equipe==='Matin'?[['semaine','📊','Semaine']]:[]);
   
   let content = '';
-  if(S.vue==='epi') content = renderEPI();
+  if(S.horsFenetre && !S.agent.est_responsable) content = renderFermee();
+  else if(S.vue==='epi') content = renderEPI();
   else if(S.vue==='code') content = renderChangerCode();
   else if(!S.epiValide && !S.agent.est_responsable) content = renderEPIBlocage();
   else if(S.vue==='chantiers') content = renderChantiers();
@@ -1381,6 +1382,10 @@ async function changerDate(d){
 // ── CHARGEMENT ─────────────────────────────────────────────────
 async function chargerTout(){
   await getOrCreateVacation();
+  if(S.horsFenetre){
+    S.controles = []; S.colisData = []; S.epiData = []; S.anomalies = []; S.tournees = []; S.epiValide = false;
+    return;
+  }
   await Promise.all([chargerControles(), chargerColis(), chargerEPI(), chargerAgentsPersonnel(), chargerAnomalies()]);
   if(S.agent.est_responsable) S.tousAgents = await db.get('agents','select=id,prenom,nom,equipe,email,est_responsable&order=nom.asc');
 }
@@ -1397,14 +1402,51 @@ async function chargerAgentsPersonnel(){
   }catch(e){ console.error('Erreur chargement agents',e); }
 }
 
+// ── FENÊTRES DE SAISIE ─────────────────────────────────────────
+// Aprem : de 16h00 à 01h00 ; Matin : de 00h00 à 08h00 ; autres équipes et responsable : toujours ouvert
+function minutesNow(){ const n=new Date(); return n.getHours()*60+n.getMinutes(); }
+function fenetreSaisieOuverte(equipe){
+  const t = minutesNow();
+  if(equipe==='Aprem') return t>=960 || t<60;
+  if(equipe==='Matin') return t<480;
+  return true;
+}
+function libelleFenetre(equipe){ return equipe==='Aprem' ? '16h00 à 01h00' : equipe==='Matin' ? '00h00 à 08h00' : ''; }
+function renderFermee(){
+  const eq = S.agent.equipe;
+  return `<div class="card" style="text-align:center">
+    <div style="font-size:42px;margin-bottom:8px">🔒</div>
+    <div class="card-title" style="justify-content:center">Saisie fermée</div>
+    <div class="info-banner">La saisie de l'équipe ${eq} est ouverte de <strong>${libelleFenetre(eq)}</strong>.<br>Revenez dans ce créneau : l'application s'ouvrira toute seule.</div>
+    <button class="btn-primary" onclick="actualiserFenetre()">🔄 Actualiser</button>
+  </div>`;
+}
+async function actualiserFenetre(){
+  S.loading = true; render();
+  try{ await chargerTout(); }catch(e){ console.error(e); }
+  S.loading = false; render();
+}
+
 async function getOrCreateVacation(){
   const equipe = S.agent.equipe || 'Toutes';
   // Chercher sur les 2 derniers jours pour gérer le passage minuit (équipe d'aprem)
   const hier = new Date(Date.now() - 36*60*60*1000);
   const hierStr = `${hier.getFullYear()}-${String(hier.getMonth()+1).padStart(2,'0')}-${String(hier.getDate()).padStart(2,'0')}`;
   let vacs = await db.get('vacations_suivi',`agent_id=eq.${S.agent.id}&date=gte.${hierStr}&order=created_at.desc&select=*`);
-  // Prendre la vacation active la plus récente (non terminée)
-  const vacActive = vacs.find(v=>!v.terminee);
+  S.horsFenetre = false;
+  // Hors du créneau de saisie : on ferme une vacation oubliée et on n'en crée pas de nouvelle
+  if(!S.agent.est_responsable && !fenetreSaisieOuverte(equipe)){
+    const oubliee = vacs.find(v=>!v.terminee);
+    if(oubliee){ try{ await db.patch('vacations_suivi',`id=eq.${oubliee.id}`,{terminee:true}); }catch(e){} }
+    S.vacationId = null; S.horsFenetre = true;
+    return;
+  }
+  // Prendre la vacation active la plus récente (non terminée) ; une vacation ouverte depuis plus de 14 h est périmée
+  let vacActive = vacs.find(v=>!v.terminee);
+  if(vacActive && vacActive.created_at && (Date.now() - new Date(vacActive.created_at.endsWith('Z')?vacActive.created_at:vacActive.created_at+'Z').getTime()) > 14*3600*1000){
+    try{ await db.patch('vacations_suivi',`id=eq.${vacActive.id}`,{terminee:true}); }catch(e){}
+    vacActive = null;
+  }
   if(!vacActive){
     const created = await db.post('vacations_suivi',{agent_id:S.agent.id, equipe, date:S.date});
     S.vacationId = created[0].id;
@@ -2236,6 +2278,13 @@ function demarrerClotureAuto(){
 }
 
 async function verifierClotureAuto(){
+  // Le créneau de saisie vient de s'ouvrir : on charge la vacation
+  if(S.agent && S.horsFenetre && fenetreSaisieOuverte(S.agent.equipe)){
+    S.horsFenetre = false; S.loading = true; render();
+    try{ await chargerTout(); }catch(e){ console.error(e); }
+    S.loading = false; render();
+    return;
+  }
   if(!S.vacationId || !S.agent) return;
   const equipe = S.agent.equipe;
   if(!equipe) return;
@@ -2249,8 +2298,9 @@ async function verifierClotureAuto(){
   // Aprem : clôture auto à 01h00 (si pas encore clôturée manuellement)
   // Matin : clôture auto à 08h00 (si pas encore clôturée manuellement)
   let doitClore = false;
-  if(equipe === 'Aprem' && totalMin >= 60)  doitClore = true; // dès 01h00
-  if(equipe === 'Matin' && totalMin >= 480) doitClore = true; // dès 08h00
+  // Fenêtres de clôture : sinon la vacation se fermait dès l'ouverture de l'application pendant la vacation (ex. Aprem à 17h)
+  if(equipe === 'Aprem' && !fenetreSaisieOuverte('Aprem')) doitClore = true; // de 01h00 à 16h00
+  if(equipe === 'Matin' && !fenetreSaisieOuverte('Matin')) doitClore = true; // à partir de 08h00
 
   if(!doitClore) return;
 
