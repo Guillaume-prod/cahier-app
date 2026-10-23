@@ -1,4 +1,4 @@
-const CACHE_NAME = 'cahier-mlh-v18'; // Incrémenter cette version force le rechargement
+const CACHE_NAME = 'cahier-mlh-v19'; // Incrémenter cette version force le rechargement
 const urlsToCache = [
   '/cahier-app/',
   '/cahier-app/index.html',
@@ -64,4 +64,16 @@ self.addEventListener('notificationclick', e => {
       return self.clients.openWindow('/cahier-app/');
     })
   );
+});
+
+// Réception d'un rappel envoyé par le serveur (fonctionne application fermée)
+self.addEventListener('push', e => {
+  let d = { title: '📦 Rappel relevé colis', body: 'Pense à saisir le relevé colis !' };
+  try { if (e.data) d = Object.assign(d, e.data.json()); } catch (_) {}
+  e.waitUntil(self.registration.showNotification(d.title, {
+    body: d.body,
+    icon: 'https://guillaume-prod.github.io/cahier-app/favicon.png',
+    badge: 'https://guillaume-prod.github.io/cahier-app/favicon.png',
+    tag: 'rappel-colis', renotify: true, vibrate: [250, 120, 250]
+  }));
 });

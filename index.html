@@ -126,7 +126,7 @@ async function sbFetch(method, path, body){
   // Jeton de l'utilisateur connecté (renouvelé automatiquement) ; sinon clé publique (avant connexion)
   let token = SUPABASE_KEY;
   try{ const { data } = await supabaseAuth.auth.getSession(); if(data && data.session) token = data.session.access_token; }catch(e){}
-  const opts = {method, headers:{'apikey':SUPABASE_KEY,'Authorization':`Bearer ${token}`,'Content-Type':'application/json','Prefer':'return=representation'}};
+  const opts = {method, headers:{'apikey':SUPABASE_KEY,'Authorization':`Bearer ${token}`,'Content-Type':'application/json','Prefer':(path.includes('on_conflict')?'resolution=merge-duplicates,return=representation':'return=representation')}};
   if(body) opts.body = JSON.stringify(body);
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, opts);
   const t = await res.text();
@@ -1316,6 +1316,7 @@ async function connexion(){
     }
     render();
     await demanderPermissionNotif();
+    await inscrirePush();
     demarrerRappelColis();
     demarrerClotureAuto();
   }catch(e){ toast('Erreur connexion','err'); console.error(e); }
@@ -1344,6 +1345,7 @@ async function changerCode(){
 }
 
 async function deconnexion(){
+  await desinscrirePush();
   arreterRappelColis();
   await supabaseAuth.auth.signOut();
   S = {agent:null, vue:'epi', loading:false, vacationId:null, date:getToday(), controles:[], colisData:[], epiData:[], anomalies:[], epiValide:false, tournees:[], toutesVacations:[], adminVue:'liste', modalAgent:null, tousAgents:[], authSession:null, sessionColisActive:null, archiveDate:null, archivesData:null, lignesSession:{}};
@@ -2332,20 +2334,47 @@ async function verifierClotureAuto(){
 
 let rappelColisInterval = null;
 
+
+// ── NOTIFICATIONS PUSH (rappel relevé colis, même application fermée) ──────
+const VAPID_PUBLIC_KEY = 'BN8UfGgk2bYV5_A3knFlPb7kf_dWYZWGz4gXNHgY5jjTYfDjwfDASAiiLIeFhPb1RjLPFYHf6QpzaKVufjfA82Y';
+function urlBase64ToUint8Array(b64){
+  const pad = '='.repeat((4 - b64.length % 4) % 4);
+  const raw = atob((b64+pad).replace(/-/g,'+').replace(/_/g,'/'));
+  return Uint8Array.from([...raw].map(c=>c.charCodeAt(0)));
+}
+async function inscrirePush(){
+  try{
+    if(!('serviceWorker' in navigator) || !('PushManager' in window) || Notification.permission !== 'granted' || !S.agent) return;
+    const reg = await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    if(!sub) sub = await reg.pushManager.subscribe({userVisibleOnly:true, applicationServerKey:urlBase64ToUint8Array(VAPID_PUBLIC_KEY)});
+    const j = sub.toJSON();
+    await db.post('push_subscriptions?on_conflict=endpoint', {agent_id:String(S.agent.id), equipe:S.agent.equipe||null, endpoint:j.endpoint, p256dh:j.keys.p256dh, auth:j.keys.auth});
+    window._pushActif = true;
+  }catch(e){ console.error('Inscription push impossible', e); window._pushActif = false; }
+}
+async function desinscrirePush(){
+  try{
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    if(sub){ await db.del('push_subscriptions', `endpoint=eq.${encodeURIComponent(sub.endpoint)}`); }
+  }catch(e){}
+  window._pushActif = false;
+}
+
 function programmmerProchainRappel(){ /* ancien mécanisme remplacé par verifierRappelColis() */ }
 
-let dernierRappelCle = null;
+let dernierRappelLocal = 0;
+const INTERVALLE_RAPPEL_MIN = 45;
 function verifierRappelColis(){
   if(!S.agent || !S.vacationId || S.horsFenetre) return;
-  const n = new Date();
-  if(n.getMinutes() > 10) return; // on rappelle dans les 10 minutes qui suivent l'heure pile
-  const cle = n.toDateString()+'-'+n.getHours();
-  if(dernierRappelCle === cle) return;
-  // Pas de rappel si un relevé vient d'être saisi (moins de 25 minutes)
-  const recent = (S.colisData||[]).some(c=>c.created_at && (Date.now() - new Date(c.created_at.endsWith('Z')?c.created_at:c.created_at+'Z').getTime()) < 25*60*1000);
-  dernierRappelCle = cle;
-  if(recent) return;
-  envoyerNotif('📦 Rappel relevé colis', 'Pense à saisir le relevé colis !');
+  const maintenant = Date.now();
+  if(!dernierRappelLocal) dernierRappelLocal = maintenant; // point de départ : connexion à la vacation
+  const dernierRelevé = Math.max(0, ...(S.colisData||[]).map(c=>c.created_at ? new Date(c.created_at.endsWith('Z')?c.created_at:c.created_at+'Z').getTime() : 0));
+  const ref = Math.max(dernierRappelLocal, dernierRelevé);
+  if(maintenant - ref < INTERVALLE_RAPPEL_MIN*60*1000) return;
+  dernierRappelLocal = maintenant;
+  if(!window._pushActif) envoyerNotif('📦 Rappel relevé colis', 'Pense à saisir le relevé colis !');
   toast('📦 Pense à saisir le relevé colis !','ok');
   try{ if(navigator.vibrate) navigator.vibrate([250,120,250]); }catch(e){}
 }
