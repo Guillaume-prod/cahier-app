@@ -2251,20 +2251,23 @@ async function demanderPermissionNotif(){
 }
 
 function envoyerNotif(titre, corps){
-  if(Notification.permission !== 'granted') return;
-  const notif = new Notification(titre, {
+  if(!('Notification' in window) || Notification.permission !== 'granted') return;
+  const opts = {
     body: corps,
     icon: 'https://guillaume-prod.github.io/cahier-app/favicon.png',
     badge: 'https://guillaume-prod.github.io/cahier-app/favicon.png',
     tag: 'rappel-colis',
     renotify: true,
-  });
-  notif.onclick = () => {
-    window.focus();
-    S.vue = 'colis';
-    render();
-    notif.close();
+    vibrate: [250,120,250],
   };
+  // Sur Android, les notifications doivent passer par le service worker
+  if('serviceWorker' in navigator){
+    navigator.serviceWorker.ready.then(reg=>reg.showNotification(titre, opts)).catch(()=>{
+      try{ new Notification(titre, opts); }catch(e){}
+    });
+  } else {
+    try{ new Notification(titre, opts); }catch(e){}
+  }
 }
 
 // ── CLÔTURE AUTOMATIQUE ─────────────────────────────────────────
@@ -2329,41 +2332,39 @@ async function verifierClotureAuto(){
 
 let rappelColisInterval = null;
 
-function programmmerProchainRappel(){
-  if(Notification.permission !== 'granted') return;
-  const now = new Date();
-  const msJusquaProchainHeure = (60 - now.getMinutes()) * 60 * 1000 - now.getSeconds() * 1000;
-  
-  // Envoyer au Service Worker
-  if(navigator.serviceWorker.controller){
-    navigator.serviceWorker.controller.postMessage({
-      type: 'SCHEDULE_NOTIF',
-      delay: msJusquaProchainHeure
-    });
-  } else {
-    // Fallback local si SW pas encore actif
-    if(rappelColisInterval) clearInterval(rappelColisInterval);
-    setTimeout(()=>{
-      envoyerNotif('📦 Rappel relevé colis', 'Pense à saisir le relevé colis !');
-      rappelColisInterval = setInterval(()=>{
-        envoyerNotif('📦 Rappel relevé colis', 'Pense à saisir le relevé colis !');
-      }, 60*60*1000);
-    }, msJusquaProchainHeure);
-  }
+function programmmerProchainRappel(){ /* ancien mécanisme remplacé par verifierRappelColis() */ }
+
+let dernierRappelCle = null;
+function verifierRappelColis(){
+  if(!S.agent || !S.vacationId || S.horsFenetre) return;
+  const n = new Date();
+  if(n.getMinutes() > 10) return; // on rappelle dans les 10 minutes qui suivent l'heure pile
+  const cle = n.toDateString()+'-'+n.getHours();
+  if(dernierRappelCle === cle) return;
+  // Pas de rappel si un relevé vient d'être saisi (moins de 25 minutes)
+  const recent = (S.colisData||[]).some(c=>c.created_at && (Date.now() - new Date(c.created_at.endsWith('Z')?c.created_at:c.created_at+'Z').getTime()) < 25*60*1000);
+  dernierRappelCle = cle;
+  if(recent) return;
+  envoyerNotif('📦 Rappel relevé colis', 'Pense à saisir le relevé colis !');
+  toast('📦 Pense à saisir le relevé colis !','ok');
+  try{ if(navigator.vibrate) navigator.vibrate([250,120,250]); }catch(e){}
 }
 
 function demarrerRappelColis(){
-  programmmerProchainRappel();
+  if(rappelColisInterval) clearInterval(rappelColisInterval);
+  rappelColisInterval = setInterval(verifierRappelColis, 30*1000);
+  if(!window._rappelVisibilite){
+    window._rappelVisibilite = true;
+    // Quand le téléphone se réveille / l'application revient au premier plan : on rattrape un rappel manqué
+    document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) verifierRappelColis(); });
+  }
+  verifierRappelColis();
 }
 
 function arreterRappelColis(){
   if(rappelColisInterval){
     clearInterval(rappelColisInterval);
     rappelColisInterval = null;
-  }
-  // Signaler au SW d'arrêter
-  if(navigator.serviceWorker.controller){
-    navigator.serviceWorker.controller.postMessage({type: 'STOP_NOTIF'});
   }
 }
 </script>
