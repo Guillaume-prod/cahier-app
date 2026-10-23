@@ -98,6 +98,7 @@ select.form-input{cursor:pointer;}
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
 const SUPABASE_URL = 'https://cogducsipchjuxsafuqv.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_qDyP53AXFSqqLghWV70FNw_wSreDYSz';
@@ -113,7 +114,7 @@ let PERSONNEL_DB = {}; // { 'Matin': [{id,prenom,nom},...], 'Aprem': [...], 'Soi
 let S = {
   agent: null, vue: 'epi', loading: false,
   vacationId: null, date: getToday(),
-  controles: [], colisData: [], epiData: [], anomalies: [], epiValide: false,
+  controles: [], colisData: [], epiData: [], anomalies: [], epiValide: false, fiche: null, ficheIndispo: false,
   epiEquipeSelectionnee: '',
   modeTest: false, sessionColis: 1,
   toutesVacations: [], adminVue: 'liste',
@@ -655,8 +656,8 @@ function render(){
   }
   
   const nav = S.agent.est_responsable
-    ? [['epi','🦺','EPI'],['chantiers','📋','Chantiers'],['colis','📦','Colis/h'],['anomalies','⚠️','Anomalies'],['pdf','📄','PDF'],['semaine','📊','Semaine'],['admin','⚙️','Admin']]
-    : [['epi','🦺','EPI'],['chantiers','📋','Chantiers'],['colis','📦','Colis/h'],['anomalies','⚠️','Anomalies'],['pdf','📄','PDF']].concat(S.agent.equipe==='Matin'?[['semaine','📊','Semaine']]:[]);
+    ? [['epi','🦺','EPI'],['chantiers','📋','Chantiers'],['colis','📦','Colis/h'],['anomalies','⚠️','Anomalies'],['fiche','📝','Fiche'],['pdf','📄','PDF'],['semaine','📊','Semaine'],['kpi','📈','KPI'],['admin','⚙️','Admin']]
+    : [['epi','🦺','EPI'],['chantiers','📋','Chantiers'],['colis','📦','Colis/h'],['anomalies','⚠️','Anomalies'],['fiche','📝','Fiche'],['pdf','📄','PDF']].concat(S.agent.equipe==='Matin'?[['semaine','📊','Semaine']]:[]);
   
   let content = '';
   if(S.horsFenetre && !S.agent.est_responsable) content = renderFermee();
@@ -669,6 +670,8 @@ function render(){
     catch(e){ content = `<div class="card" style="background:#fee2e2;border:2px solid #dc2626"><div style="font-weight:700;color:#dc2626;margin-bottom:8px">❌ Erreur renderColis</div><div style="font-size:12px;font-family:monospace;white-space:pre-wrap">${e.message}\n\n${e.stack}</div></div>`; }
   }
   else if(S.vue==='anomalies') content = renderAnomalies();
+  else if(S.vue==='fiche') content = renderFiche();
+  else if(S.vue==='kpi') content = renderKPI();
   else if(S.vue==='pdf') content = renderPDF();
   else if(S.vue==='semaine') content = renderSemaine();
   else if(S.vue==='admin') content = renderAdmin();
@@ -1033,6 +1036,7 @@ function renderAdmin(){
     <button class="btn-add" onclick="ouvrirAjoutAgent()" style="margin-top:10px">+ Ajouter un agent</button>
   </div>
   ${S.modalAgent?renderModalAgent():''}
+  ${renderExportKPI()}
   <div class="card">
     <div class="card-title">📋 Chantiers du jour</div>
     ${renderAdminChantiers()}
@@ -1356,7 +1360,8 @@ async function finVacation(){
   if(!confirm('Terminer cette vacation ?')) return;
   arreterRappelColis();
   if(clotureAutoInterval){ clearInterval(clotureAutoInterval); clotureAutoInterval=null; }
-  // Marquer la vacation comme terminée en base
+  // Mettre à jour les KPI puis marquer la vacation comme terminée en base
+  try{ await syncKPIVacationCourante(); }catch(e){}
   try{ if(S.vacationId) await db.patch('vacations_suivi',`id=eq.${S.vacationId}`,{terminee:true}); }catch(e){}
   S.vacationId = null;
   S.epiValide = false;
@@ -1373,6 +1378,7 @@ async function finVacation(){
 async function setVue(v){
   if(!S.epiValide && v!=='epi' && v!=='code' && !S.agent.est_responsable){ toast("Valide d'abord les EPI avant de continuer",'err'); return; }
   S.vue = v; render();
+  if(v==='kpi' && S.agent.est_responsable) ouvrirKPI();
 }
 
 async function changerDate(d){
@@ -1385,10 +1391,10 @@ async function changerDate(d){
 async function chargerTout(){
   await getOrCreateVacation();
   if(S.horsFenetre){
-    S.controles = []; S.colisData = []; S.epiData = []; S.anomalies = []; S.tournees = []; S.epiValide = false;
+    S.controles = []; S.colisData = []; S.epiData = []; S.anomalies = []; S.tournees = []; S.epiValide = false; S.fiche = null;
     return;
   }
-  await Promise.all([chargerControles(), chargerColis(), chargerEPI(), chargerAgentsPersonnel(), chargerAnomalies()]);
+  await Promise.all([chargerControles(), chargerColis(), chargerEPI(), chargerAgentsPersonnel(), chargerAnomalies(), chargerFiche()]);
   if(S.agent.est_responsable) S.tousAgents = await db.get('agents','select=id,prenom,nom,equipe,email,est_responsable&order=nom.asc');
 }
 
@@ -1858,6 +1864,11 @@ async function genererRecapSemaine(){
       db.get('controles_chantiers',`vacation_id=in.(${ids})&select=id,vacation_id`),
       db.get('agents',`id=in.(${[...new Set(vacs.map(v=>v.agent_id))].join(',')})&select=id,prenom,nom`)
     ]);
+    let fiches = [];
+    try{ fiches = await db.get('fiches_vacation',`vacation_id=in.(${ids})`); }catch(e){ fiches = []; }
+    const volJ = vacs.map(v=>{ const r = fiches.find(x=>String(x.vacation_id)===String(v.id)); const f = r?normFiche(r):null; const c = calcFiche(f);
+      return {v, f, c, aprem:/^(Aprem|Soir)/i.test(v.equipe||'')}; }).filter(x=>x.f && (x.c.lignes.length || aVal(x.f.presents) || x.c.totConc || x.f.fin_tri));
+    const wk = volJ.reduce((a,x)=>{ a.disp+=x.c.sumDisp; a.dist+=x.c.sumDist; a.hn+=x.c.hn; a.total+=x.c.totalHN; a.conc+=x.c.totConc; return a; },{disp:0,dist:0,hn:0,total:0,conc:0});
     const parVac = vacs.map(v=>{
       const c = colis.filter(x=>x.vacation_id===v.id);
       const moy = c.length ? calcMoyenneColisArchive(c) : null;
@@ -1892,6 +1903,14 @@ async function genererRecapSemaine(){
           <td style="padding:6px">${x.nbAno||'—'}</td><td style="padding:6px">${x.nbEpi||'—'}</td></tr>`).join('')}
       </table>
 
+      <h2 style="color:#1a56a0;font-size:14px;margin:16px 0 8px;border-left:4px solid #1a56a0;padding-left:8px">📦 Volumes de la semaine</h2>
+      ${volJ.length?`<table style="width:100%;border-collapse:collapse;font-size:11px">
+        <tr style="background:#1a56a0;color:white"><th style="${th}">Jour</th><th style="${th}">Équipe</th><th style="${th}">Présents</th><th style="${th}">Dispersion</th><th style="${th}">Distribution</th><th style="${th}">HN</th><th style="${th}">Total</th><th style="${th}">Concentration (chargés)</th><th style="${th}">Fin de tri</th></tr>
+        ${volJ.map(x=>`<tr style="border-bottom:1px solid #eee"><td style="padding:6px">${fmtJ(x.v.date)}</td><td style="padding:6px">${escHtml(x.v.equipe||'—')}</td><td style="padding:6px;text-align:center">${aVal(x.f.presents)?nI(x.f.presents):'—'}</td><td style="padding:6px;text-align:center">${fmtN(x.c.sumDisp)}</td><td style="padding:6px;text-align:center">${fmtN(x.c.sumDist)}</td><td style="padding:6px;text-align:center">${fmtN(x.c.hn)}</td><td style="padding:6px;text-align:center;font-weight:bold">${fmtN(x.c.totalHN)}</td><td style="padding:6px;text-align:center">${x.aprem?fmtN(x.c.totConc):'—'}</td>${(()=>{ const d=ecartTri(x.f.fin_tri,x.f.cible_tri); return `<td style="padding:6px;text-align:center">${x.f.fin_tri?x.f.fin_tri+(d!=null?(d<=0?' ✅':' ⏱+'+d+'min'):''):'—'}</td>`; })()}</tr>`).join('')}
+        <tr style="background:#dcfce7;font-weight:bold"><td style="padding:6px" colspan="3">Total sans Concentration</td><td style="padding:6px;text-align:center">${fmtN(wk.disp)}</td><td style="padding:6px;text-align:center">${fmtN(wk.dist)}</td><td style="padding:6px;text-align:center">${fmtN(wk.hn)}</td><td style="padding:6px;text-align:center">${fmtN(wk.total)}</td><td style="padding:6px;text-align:center">${fmtN(wk.conc)}</td><td></td></tr>
+        <tr style="background:#ccfbf1;font-weight:bold"><td style="padding:6px" colspan="6">Total avec Concentration</td><td style="padding:6px;text-align:center" colspan="2">${fmtN(wk.total+wk.conc)}</td><td></td></tr>
+      </table>`:'<p style="color:#9ca3af">Aucune fiche de volumes saisie cette semaine.</p>'}
+
       <h2 style="color:#d97706;font-size:14px;margin:16px 0 8px;border-left:4px solid #d97706;padding-left:8px">⚠️ Anomalies de la semaine (${anos.length})</h2>
       ${anos.length?`
       <p>${parType.filter(x=>x.n).map(x=>`<span style="display:inline-block;margin-right:12px;font-weight:bold;color:${x.t.couleur}">${escHtml(x.t.label)} : ${x.n}</span>`).join('')}</p>
@@ -1913,6 +1932,7 @@ async function genererRecapSemaine(){
       + `Vacations : ${vacs.length} | Colis/h moyen : ${moyGlobale||'—'} (objectif ${OBJECTIF_COLIS})\n`
       + `Anomalies : ${anos.length}${anos.length?' ('+parType.filter(x=>x.n).map(x=>x.t.code+' '+x.n).join(', ')+')':''}\n`
       + `Manquements EPI : ${epiManq.length}\n`
+      + (volJ.length?`Volumes (hors Concentration) : ${fmtN(wk.total)} colis (dispersion ${fmtN(wk.disp)}, distribution ${fmtN(wk.dist)}, HN ${fmtN(wk.hn)}) | avec Concentration : ${fmtN(wk.total+wk.conc)}\n`:'')
       + `Détail dans le PDF joint.\nÉtabli par ${S.agent.prenom} ${S.agent.nom}`;
     const overlay = document.createElement('div');
     overlay.id = 'pdf-overlay';
@@ -1937,12 +1957,16 @@ async function genererRecapSemaine(){
 }
 
 // ── EXPORT PDF ─────────────────────────────────────────────────
-function exporterPDF(){
+async function exporterPDF(){
+  if(_ficheTimer) await sauverFiche();
   const moy = calcMoyenneColis();
   const contenu = `
   <div style="font-family:Arial,sans-serif;padding:20px;max-width:800px;margin:0 auto;font-size:12px">
   <h1 style="color:#1a56a0;border-bottom:3px solid #1a56a0;padding-bottom:8px;font-size:18px">📓 Cahier de Vacation — La Poste Mulhouse</h1>
   <p><strong>Date :</strong> ${fmtDate(S.date)} | <strong>Équipe :</strong> ${S.agent.equipe||'—'} | <strong>Saisi par :</strong> ${S.agent.prenom} ${S.agent.nom}</p>
+
+  ${htmlSynthese({colis:S.colisData, controles:S.controles, tournees:S.tournees, epi:S.epiData, anomalies:S.anomalies, fiche:S.fiche, equipe:S.agent.equipe})}
+  ${htmlFiche(S.fiche, /^(Aprem|Soir)/i.test(S.agent.equipe||''), S.agent.equipe)}
 
   <h2 style="color:#1a56a0;font-size:14px;margin:16px 0 8px;border-left:4px solid #1a56a0;padding-left:8px">📋 Vérification des Chantiers</h2>
   ${S.controles.length?S.controles.map(c=>{
@@ -2060,8 +2084,9 @@ async function exporterRapportNuit(dateAprem, dateMatin){
         const anomalies = await db.get('anomalies',`vacation_id=eq.${v.id}&order=created_at.asc`);
         const ids = controles.map(c=>c.id);
         const tournees = ids.length ? await db.get('tournees',`controle_id=in.(${ids.join(',')})&order=numero.asc`) : [];
-        const score = controles.length + colis.filter(c=>c.quantite_colis).length + epi.length + anomalies.length;
-        if(!meilleur || score > meilleur.score) meilleur = {score, vacation:v, agent, controles, colis, epi, anomalies, tournees};
+        const fiche = await chargerFicheDe(v.id);
+        const score = controles.length + colis.filter(c=>c.quantite_colis).length + epi.length + anomalies.length + (fiche?fiche.volumes.length+(aVal(fiche.presents)?1:0):0);
+        if(!meilleur || score > meilleur.score) meilleur = {score, vacation:v, agent, controles, colis, epi, anomalies, tournees, fiche};
       }
       const {score, ...detail} = meilleur;
       return detail;
@@ -2112,6 +2137,9 @@ async function exporterRapportNuit(dateAprem, dateMatin){
           </div>
           ${moy?`<div style="margin-left:auto;padding:6px 14px;border-radius:8px;font-weight:700;font-size:13px;background:${moyOk?'#dcfce7':'#fee2e2'};color:${moyOk?'#16a34a':'#dc2626'}">${moy} colis/h ${moyOk?'✅':'❌'}</div>`:''}
         </div>
+
+        ${htmlSynthese(d)}
+        ${htmlFiche(d.fiche, /Aprem/.test(label), d.vacation&&d.vacation.equipe||label)}
 
         <h3 style="color:#1a56a0;font-size:13px;margin:14px 0 8px;border-left:4px solid #1a56a0;padding-left:8px">📦 Relevés Colis/H — Objectif ${OBJECTIF_COLIS} colis/h</h3>
         ${d.colis.filter(c=>c.quantite_colis).length?`
@@ -2185,6 +2213,7 @@ async function exporterRapportNuit(dateAprem, dateMatin){
           <h1 style="color:#1a56a0;font-size:20px;margin:0">🌙 Rapport de Nuit — La Poste Mulhouse</h1>
           <p style="color:#5a6478;font-size:12px;margin:4px 0 0">🌆 Aprem ${fmtDate(dateAprem)} → ☀️ Matin ${fmtDate(dateMatin)}</p>
         </div>
+        ${htmlTotauxNuit(detailAprem&&detailAprem.fiche, detailMatin&&detailMatin.fiche)}
       </div>
       ${htmlVacation(detailAprem, 'Équipe Aprem', '🌆', fmtDate(dateAprem))}
       <div style="page-break-before:always"></div>
@@ -2215,6 +2244,668 @@ async function exporterRapportNuit(dateAprem, dateMatin){
   }catch(e){
     toast('Erreur lors du chargement : '+e.message,'err');
   }
+}
+
+
+// ══════════════════════════════════════════════════════════════
+// FICHE DE VACATION (effectif, volumes, concentration) + SYNTHÈSE
+// ══════════════════════════════════════════════════════════════
+const PREVUS_DEFAUT = {aprem:20, matin:20, conc:8};
+function typeEquipe(eq){ return /Aprem|Soir/i.test(eq||'')?'aprem':(/Matin|Nuit/i.test(eq||'')?'matin':null); }
+function ficheVide(){ return {presents:'', prevus:'', interim:'', fin_tri:'', cible_tri:'', hn:'', volumes:[], conc:{presents:'', prevus:'', interim:'', liaisons:[]}, commentaire:'', passation:''}; }
+function nI(v){ const n=parseInt(v,10); return isNaN(n)?0:n; }
+function aVal(v){ return v!==''&&v!=null&&!isNaN(parseInt(v,10)); }
+function normFiche(r){
+  const f = ficheVide(); if(!r) return f;
+  f.presents = r.presents==null?'':r.presents; f.hn = r.hn==null?'':r.hn;
+  f.prevus = r.prevus==null?'':r.prevus; f.interim = r.interimaires==null?'':r.interimaires;
+  f.fin_tri = r.fin_tri||''; f.cible_tri = r.cible_tri||'';
+  f.volumes = Array.isArray(r.volumes)?r.volumes:[];
+  f.conc = (r.conc && typeof r.conc==='object') ? Object.assign({presents:'',prevus:'',interim:'',liaisons:[]}, r.conc) : {presents:'',prevus:'',interim:'',liaisons:[]};
+  if(!Array.isArray(f.conc.liaisons)) f.conc.liaisons=[];
+  f.commentaire = r.commentaire||''; f.passation = r.passation||'';
+  return f;
+}
+function prevusEff(f, eq, conc){
+  const v = conc ? (f&&f.conc&&f.conc.prevus) : (f&&f.prevus);
+  if(aVal(v)) return nI(v);
+  if(conc) return PREVUS_DEFAUT.conc;
+  const t = typeEquipe(eq); return t?PREVUS_DEFAUT[t]:null;
+}
+function kpiEff(presents, prevus, interim){
+  if(!aVal(presents)||prevus==null) return null;
+  const p = nI(presents);
+  return {presents:p, prevus, interim:aVal(interim)?nI(interim):null, ecart:p-prevus, abs: prevus>0?Math.max(0,Math.round((prevus-p)/prevus*1000)/10):0};
+}
+function txtEff(k){
+  if(!k) return '—';
+  return `${k.presents} présents / ${k.prevus} prévus — écart ${k.ecart>0?'+':''}${k.ecart} — absentéisme ${String(k.abs).replace('.',',')} %${k.interim!=null?' — dont '+k.interim+' intérimaire(s)':''}`;
+}
+function minHeure(h){ if(!h) return null; const x=h.split(':').map(Number); return x[0]*60+x[1]; }
+function ecartTri(fin, cible){
+  const a=minHeure(fin), b=minHeure(cible); if(a==null||b==null) return null;
+  let d=a-b; if(d>720) d-=1440; if(d<-720) d+=1440; return d;
+}
+function txtTri(f){
+  if(!f||!f.fin_tri) return f&&f.cible_tri ? 'Fin de tri non renseignée (cible '+f.cible_tri+')' : '—';
+  const d = ecartTri(f.fin_tri, f.cible_tri);
+  if(d==null) return 'Fin de tri à '+f.fin_tri;
+  return `Fin de tri à ${f.fin_tri} (cible ${f.cible_tri}) — ${d<=0?'✅ dans les temps'+(d<0?' ('+(-d)+' min d\'avance)':''):'⏱ retard de '+d+' min'}`;
+}
+function calcFiche(f){
+  f = f || ficheVide();
+  const lignes = (f.volumes||[]).map(l=>({...l, distrib: aVal(l.total) ? nI(l.total)-nI(l.disp) : null}));
+  const sumTot = lignes.reduce((a,l)=>a+nI(l.total),0);
+  const sumDisp = lignes.reduce((a,l)=>a+(aVal(l.total)?nI(l.disp):0),0);
+  const sumDist = lignes.reduce((a,l)=>a+(l.distrib||0),0);
+  const hn = nI(f.hn);
+  const liaisons = ((f.conc||{}).liaisons||[]).map(li=>({...li, somme:(li.camions||[]).reduce((a,c)=>a+nI(c.colis),0)}));
+  const totConc = liaisons.reduce((a,l)=>a+l.somme,0);
+  return {lignes, sumTot, sumDisp, sumDist, hn, totalHN:sumTot+hn, liaisons, totConc};
+}
+// Totaux de la nuit : { aprem, matin } = résultats de calcFiche (ou null)
+function totauxNuit(fa, fm){
+  const a = calcFiche(fa), m = calcFiche(fm);
+  const sans = {disp:a.sumDisp+m.sumDisp, dist:a.sumDist+m.sumDist, hn:a.hn+m.hn, total:a.totalHN+m.totalHN};
+  return {a, m, sans, conc:a.totConc, avec: sans.total + a.totConc};
+}
+async function chargerFiche(){
+  S.ficheIndispo = false;
+  if(!S.vacationId){ S.fiche = null; return; }
+  try{
+    const r = await db.get('fiches_vacation',`vacation_id=eq.${S.vacationId}`);
+    S.fiche = normFiche(r[0]);
+    const t = typeEquipe(S.agent&&S.agent.equipe);
+    if(!aVal(S.fiche.prevus) && t) S.fiche.prevus = PREVUS_DEFAUT[t];
+    if(!aVal(S.fiche.conc.prevus)) S.fiche.conc.prevus = PREVUS_DEFAUT.conc;
+  }catch(e){ console.warn('fiches_vacation indisponible', e); S.fiche = ficheVide(); S.ficheIndispo = true; }
+}
+async function chargerFicheDe(vacId){
+  try{ const r = await db.get('fiches_vacation',`vacation_id=eq.${vacId}`); return r[0]?normFiche(r[0]):null; }catch(e){ return null; }
+}
+let _ficheTimer = null;
+function planifierSaveFiche(){ clearTimeout(_ficheTimer); _ficheTimer = setTimeout(sauverFiche, 700); }
+async function sauverFiche(){
+  clearTimeout(_ficheTimer); _ficheTimer = null;
+  if(!S.vacationId || !S.fiche || S.ficheIndispo) return;
+  const f = S.fiche;
+  try{
+    await db.post('fiches_vacation?on_conflict=vacation_id', {
+      vacation_id:String(S.vacationId), presents: aVal(f.presents)?nI(f.presents):null, prevus: aVal(f.prevus)?nI(f.prevus):null, interimaires: aVal(f.interim)?nI(f.interim):null, fin_tri:f.fin_tri||null, cible_tri:f.cible_tri||null, hn: aVal(f.hn)?nI(f.hn):null,
+      volumes:f.volumes, conc:f.conc, commentaire:f.commentaire||'', passation:f.passation||'', updated_at:new Date().toISOString()
+    });
+    const el = document.getElementById('fiche-statut'); if(el) el.textContent = '✅ Enregistré';
+    planifierSyncKPI();
+  }catch(e){ const el = document.getElementById('fiche-statut'); if(el) el.textContent = '❌ Erreur d\'enregistrement'; console.error(e); }
+}
+document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='hidden' && _ficheTimer) sauverFiche(); });
+
+function fSet(path, val){
+  if(!S.fiche) S.fiche = ficheVide();
+  const p = path.split('.'); let o = S.fiche;
+  for(let i=0;i<p.length-1;i++) o = o[p[i]];
+  o[p[p.length-1]] = val;
+  const el = document.getElementById('fiche-statut'); if(el) el.textContent = '… enregistrement';
+  rafraichirFiche(); planifierSaveFiche();
+}
+function fStruct(fn){ if(!S.fiche) S.fiche = ficheVide(); fn(S.fiche); render(); planifierSaveFiche(); }
+function fAddLigne(){ fStruct(f=>f.volumes.push({nom:'Ligne '+(f.volumes.length+1), debut:'', fin:'', total:'', disp:''})); }
+function fDelLigne(i){ if(!confirm('Supprimer cette ligne ?')) return; fStruct(f=>f.volumes.splice(i,1)); }
+function fAddLiaison(){ fStruct(f=>{ if(f.conc.liaisons.length<4) f.conc.liaisons.push({camions:[{debut:'',fin:'',colis:''}]}); }); }
+function fDelLiaison(l){ if(!confirm('Supprimer cette liaison ?')) return; fStruct(f=>f.conc.liaisons.splice(l,1)); }
+function fAddCamion(l){ fStruct(f=>f.conc.liaisons[l].camions.push({debut:'',fin:'',colis:''})); }
+function fDelCamion(l,c){ fStruct(f=>f.conc.liaisons[l].camions.splice(c,1)); }
+function fmtN(n){ return (n==null||isNaN(n))?'—':Number(n).toLocaleString('fr-FR'); }
+function rafraichirFiche(){
+  const c = calcFiche(S.fiche); const set=(id,t)=>{ const e=document.getElementById(id); if(e) e.textContent=t; };
+  c.lignes.forEach((l,i)=>set('fd-'+i, l.distrib==null?'—':fmtN(l.distrib)));
+  set('f-sumDisp',fmtN(c.sumDisp)); set('f-sumDist',fmtN(c.sumDist)); set('f-sumTot',fmtN(c.sumTot)); set('f-totalHN',fmtN(c.totalHN));
+  c.liaisons.forEach((li,i)=>set('fl-'+i, fmtN(li.somme))); set('f-totConc',fmtN(c.totConc));
+  const eq = S.agent.equipe||'';
+  set('f-eff', txtEff(kpiEff(S.fiche.presents, prevusEff(S.fiche,eq,false), S.fiche.interim)));
+  set('fc-eff', txtEff(kpiEff(S.fiche.conc.presents, prevusEff(S.fiche,eq,true), S.fiche.conc.interim)));
+  set('f-tri', txtTri(S.fiche));
+}
+
+function renderFiche(){
+  const f = S.fiche || ficheVide(); const c = calcFiche(f);
+  const eq = S.agent.equipe||''; const avecConc = /^(Aprem|Soir)/i.test(eq) || S.agent.est_responsable;
+  const lbl = 'font-size:11px;color:var(--texte-doux);margin-bottom:2px;display:block';
+  const inp = 'width:100%;box-sizing:border-box;padding:9px 6px;border:1.5px solid var(--gris-bord);border-radius:8px;font-size:14px;text-align:center;background:white';
+  const box = 'background:#f4f6f9;border-radius:10px;padding:10px;margin-bottom:10px';
+  const tot = 'display:flex;justify-content:space-between;padding:4px 0;font-size:13px';
+  return `<div class="card">
+    <div class="card-title">📝 Fiche de vacation <span id="fiche-statut" style="font-size:11px;font-weight:400;color:var(--texte-doux);margin-left:auto"></span></div>
+    ${S.ficheIndispo?`<div class="info-banner" style="background:#fee2e2;color:#991b1b">⚠️ La fiche n'est pas encore activée (table manquante dans Supabase). Rien ne sera enregistré tant que l'étape SQL n'est pas faite.</div>`:''}
+
+    <div style="${box}">
+      <div style="font-weight:700;margin-bottom:6px">👥 Effectif — équipe ${escHtml(eq||'—')}</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px">
+        <div><label style="${lbl}">Prévus</label><input type="number" inputmode="numeric" min="0" style="${inp}" value="${aVal(f.prevus)?f.prevus:(prevusEff(f,eq,false)??'')}" oninput="fSet('prevus',this.value)" /></div>
+        <div><label style="${lbl}">Présents</label><input type="number" inputmode="numeric" min="0" style="${inp}" value="${f.presents}" oninput="fSet('presents',this.value)" /></div>
+        <div><label style="${lbl}">dont intérimaires</label><input type="number" inputmode="numeric" min="0" style="${inp}" value="${f.interim}" oninput="fSet('interim',this.value)" /></div>
+      </div>
+      <div id="f-eff" style="font-size:12px;margin-top:8px;color:var(--bleu);font-weight:600">${txtEff(kpiEff(f.presents, prevusEff(f,eq,false), f.interim))}</div>
+    </div>
+
+    <div style="${box}">
+      <div style="font-weight:700;margin-bottom:6px">⏱ Fin de tri</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+        <div><label style="${lbl}">Heure cible</label><input type="time" style="${inp}" value="${f.cible_tri||''}" oninput="fSet('cible_tri',this.value)" /></div>
+        <div><label style="${lbl}">Heure de fin réelle</label><input type="time" style="${inp}" value="${f.fin_tri||''}" oninput="fSet('fin_tri',this.value)" /></div>
+      </div>
+      <div id="f-tri" style="font-size:12px;margin-top:8px;color:var(--bleu);font-weight:600">${txtTri(f)}</div>
+    </div>
+
+    <div style="font-weight:700;margin:14px 0 6px">📦 Volumes triés — ligne par ligne</div>
+    ${f.volumes.length===0?`<div class="info-banner" style="text-align:center">Aucune ligne. Ajoutez une ligne pour chaque session de tri.</div>`:''}
+    ${c.lignes.map((l,i)=>`<div style="${box}">
+      <div style="display:grid;grid-template-columns:1.2fr 1fr 1fr auto;gap:6px;align-items:end">
+        <div><label style="${lbl}">Ligne / session</label><input type="text" style="${inp}" value="${escHtml(l.nom||'')}" oninput="fSet('volumes.${i}.nom',this.value)" /></div>
+        <div><label style="${lbl}">Début</label><input type="time" style="${inp}" value="${l.debut||''}" oninput="fSet('volumes.${i}.debut',this.value)" /></div>
+        <div><label style="${lbl}">Fin</label><input type="time" style="${inp}" value="${l.fin||''}" oninput="fSet('volumes.${i}.fin',this.value)" /></div>
+        <button onclick="fDelLigne(${i})" style="padding:9px 10px;background:#fee2e2;color:#dc2626;border:1.5px solid #dc2626;border-radius:8px;font-weight:700">🗑</button>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:8px">
+        <div><label style="${lbl}">Total colis</label><input type="number" inputmode="numeric" min="0" style="${inp}" value="${l.total}" oninput="fSet('volumes.${i}.total',this.value)" /></div>
+        <div><label style="${lbl}">Dispersion</label><input type="number" inputmode="numeric" min="0" style="${inp}" value="${l.disp}" oninput="fSet('volumes.${i}.disp',this.value)" /></div>
+        <div><label style="${lbl}">Distribution (auto)</label><div id="fd-${i}" style="${inp};background:#e8f0fb;font-weight:700">${l.distrib==null?'—':fmtN(l.distrib)}</div></div>
+      </div>
+    </div>`).join('')}
+    <button class="btn-primary" style="background:#1a56a0;margin-bottom:12px" onclick="fAddLigne()">+ Ajouter une ligne</button>
+
+    <div style="${box}">
+      <div style="font-weight:700;margin-bottom:6px">🧮 Total de l'équipe</div>
+      <div style="${tot}"><span>Total dispersion</span><strong id="f-sumDisp">${fmtN(c.sumDisp)}</strong></div>
+      <div style="${tot}"><span>Total distribution</span><strong id="f-sumDist">${fmtN(c.sumDist)}</strong></div>
+      <div style="${tot}"><span>Total des lignes</span><strong id="f-sumTot">${fmtN(c.sumTot)}</strong></div>
+      <div style="margin:8px 0"><label style="${lbl}">HN (colis hors normes de l'équipe)</label>
+        <input type="number" inputmode="numeric" min="0" style="${inp}" value="${f.hn}" oninput="fSet('hn',this.value)" /></div>
+      <div style="${tot};border-top:2px solid var(--bleu);margin-top:6px;padding-top:8px;font-size:15px"><span>Total colis (HN inclus)</span><strong id="f-totalHN" style="color:var(--bleu)">${fmtN(c.totalHN)}</strong></div>
+    </div>
+
+    ${avecConc?`
+    <div style="font-weight:700;margin:18px 0 6px">🚚 Concentration (saisie par le chef Aprem)</div>
+    <div style="${box}">
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px">
+        <div><label style="${lbl}">Prévus</label><input type="number" inputmode="numeric" min="0" style="${inp}" value="${aVal(f.conc.prevus)?f.conc.prevus:PREVUS_DEFAUT.conc}" oninput="fSet('conc.prevus',this.value)" /></div>
+        <div><label style="${lbl}">Présents</label><input type="number" inputmode="numeric" min="0" style="${inp}" value="${f.conc.presents}" oninput="fSet('conc.presents',this.value)" /></div>
+        <div><label style="${lbl}">dont intérimaires</label><input type="number" inputmode="numeric" min="0" style="${inp}" value="${f.conc.interim}" oninput="fSet('conc.interim',this.value)" /></div>
+      </div>
+      <div id="fc-eff" style="font-size:12px;margin-top:8px;color:var(--bleu);font-weight:600">${txtEff(kpiEff(f.conc.presents, prevusEff(f,eq,true), f.conc.interim))}</div>
+    </div>
+    ${c.liaisons.map((li,l)=>`<div style="${box}">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <strong>Liaison ${l+1}</strong>
+        <button onclick="fDelLiaison(${l})" style="padding:4px 10px;background:#fee2e2;color:#dc2626;border:1.5px solid #dc2626;border-radius:8px;font-size:12px;font-weight:700">🗑 Liaison</button>
+      </div>
+      ${(li.camions||[]).map((cm,k)=>`<div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:6px;align-items:end;margin-bottom:6px">
+        <div><label style="${lbl}">Début camion</label><input type="time" style="${inp}" value="${cm.debut||''}" oninput="fSet('conc.liaisons.${l}.camions.${k}.debut',this.value)" /></div>
+        <div><label style="${lbl}">Fin camion</label><input type="time" style="${inp}" value="${cm.fin||''}" oninput="fSet('conc.liaisons.${l}.camions.${k}.fin',this.value)" /></div>
+        <div><label style="${lbl}">Colis chargés</label><input type="number" inputmode="numeric" min="0" style="${inp}" value="${cm.colis}" oninput="fSet('conc.liaisons.${l}.camions.${k}.colis',this.value)" /></div>
+        <button onclick="fDelCamion(${l},${k})" style="padding:9px 10px;background:#fee2e2;color:#dc2626;border:1.5px solid #dc2626;border-radius:8px;font-weight:700">✕</button>
+      </div>`).join('')}
+      <button onclick="fAddCamion(${l})" style="padding:8px 12px;background:white;border:1.5px dashed var(--gris-bord);border-radius:8px;font-size:12px;width:100%">+ Ajouter un camion</button>
+      <div style="${tot};margin-top:6px"><span>Colis chargés (liaison ${l+1})</span><strong id="fl-${l}">${fmtN(li.somme)}</strong></div>
+    </div>`).join('')}
+    ${c.liaisons.length<4?`<button class="btn-primary" style="background:#0f766e;margin-bottom:10px" onclick="fAddLiaison()">+ Ajouter une liaison (${c.liaisons.length}/4)</button>`:''}
+    <div style="${box};background:#e8f0fb"><div style="${tot};font-size:15px"><span>Total colis chargés (Concentration)</span><strong id="f-totConc" style="color:var(--bleu)">${fmtN(c.totConc)}</strong></div></div>
+    `:''}
+
+    <div style="font-weight:700;margin:18px 0 6px">💬 Commentaire et passation</div>
+    <label style="${lbl}">Événements marquants de la vacation</label>
+    <textarea class="form-input" rows="3" placeholder="Pannes, retards camions, échanges avec La Poste…" oninput="fSet('commentaire',this.value)" style="resize:vertical;margin-bottom:8px">${escHtml(f.commentaire||'')}</textarea>
+    <label style="${lbl}">Consignes pour l'équipe suivante</label>
+    <textarea class="form-input" rows="3" placeholder="Points à surveiller, travail restant…" oninput="fSet('passation',this.value)" style="resize:vertical">${escHtml(f.passation||'')}</textarea>
+  </div>`;
+}
+
+// ── Synthèse automatique d'une vacation ────────────────────────
+function syntheseVac(d){
+  const colis = (d.colis||[]).filter(c=>c.quantite_colis);
+  const moy = colis.length ? calcMoyenneColisArchive(d.colis) : null;
+  const sess = {}; (d.colis||[]).forEach(c=>{ const s=c.session_numero||1; sess[s]=Math.max(sess[s]||0, c.arret_machine_cumul||0); });
+  const arret = Object.values(sess).reduce((a,b)=>a+b,0);
+  const nok = colis.filter(c=>c.cadence_ok===false);
+  const raisons = {}; nok.forEach(c=>{ const r=(c.raison_non_atteinte||'').trim(); if(r) raisons[r]=(raisons[r]||0)+1; });
+  const trn = (d.tournees||[]).filter(t=>t.resultat);
+  const trnNok = trn.filter(t=>t.resultat!=='OK');
+  const epiM = (d.epi||[]).filter(e=>e.nom_prenom&&e.nom_prenom!=='RAS');
+  const parType = TYPES_ANOMALIE.map(t=>({t,n:(d.anomalies||[]).filter(a=>a.type_anomalie===t.code).length})).filter(x=>x.n);
+  return {moy, nbReleves:colis.length, nok:nok.length, raisons, arret, trnTot:trn.length, trnNok:trnNok.length, epiM, parType, nbAno:(d.anomalies||[]).length, nbCtrl:(d.controles||[]).length};
+}
+function faitsMarquants(s, fiche, eq){
+  const L = [];
+  if(s.moy!=null) L.push(`Cadence moyenne de <b>${fmtN(s.moy)} colis/h</b> pour un objectif de ${fmtN(OBJECTIF_COLIS)} : ${s.moy>=OBJECTIF_COLIS?'objectif atteint ✅':'objectif non atteint ('+fmtN(s.moy-OBJECTIF_COLIS)+' colis/h) ❌'}.`);
+  else L.push('Aucun relevé de cadence exploitable sur cette vacation.');
+  if(s.nok){ const r = Object.entries(s.raisons).sort((a,b)=>b[1]-a[1]).map(([k,n])=>escHtml(k)+(n>1?' ('+n+')':'')).join(', ');
+    L.push(`<b>${s.nok}</b> relevé(s) sous objectif sur ${s.nbReleves}${r?' — causes citées : '+r:' — aucune cause renseignée'}.`); }
+  if(s.arret) L.push(`Arrêts machine cumulés : <b>${s.arret} min</b> (déduits du calcul de cadence).`);
+  if(s.nbAno) L.push(`<b>${s.nbAno}</b> anomalie(s) signalée(s) : ${s.parType.map(x=>x.t.code+' '+x.n).join(', ')}.`); else L.push('Aucune anomalie signalée.');
+  if(s.trnTot) L.push(`Contrôles chantiers : ${s.trnTot-s.trnNok}/${s.trnTot} tournées conformes${s.trnNok?' — <b>'+s.trnNok+' non conforme(s)</b>':''}.`);
+  if(s.epiM.length) L.push(`EPI : <b>${s.epiM.length}</b> manquement(s) — ${s.epiM.map(e=>escHtml(e.nom_prenom)+' ('+escHtml(e.epi_manquant||'?')+')').join(', ')}.`); else L.push('Aucun manquement EPI.');
+  if(fiche){
+    if(aVal(fiche.presents)) L.push(`Effectif présent : <b>${nI(fiche.presents)}</b> personne(s).`);
+    if(fiche.fin_tri || fiche.cible_tri) L.push(txtTri(fiche)+'.');
+  }
+  if(fiche && fiche.commentaire) L.push(`Événements : ${escHtml(fiche.commentaire)}`);
+  return L;
+}
+function htmlSynthese(d){
+  const s = syntheseVac(d); const f = d.fiche; const eq = d.equipe||(d.vacation&&d.vacation.equipe)||'';
+  const kE = f?kpiEff(f.presents, prevusEff(f,eq,false), f.interim):null;
+  const col = s.moy==null?'#f4f6f9':(s.moy>=OBJECTIF_COLIS?'#dcfce7':'#fee2e2');
+  const td = 'padding:8px;text-align:center;border:3px solid white';
+  return `<h3 style="color:#1a56a0;font-size:13px;margin:6px 0 8px;border-left:4px solid #1a56a0;padding-left:8px">🧭 Synthèse de la vacation</h3>
+  <table style="width:100%;border-collapse:collapse;margin-bottom:8px"><tr>
+    <td style="${td};background:${col}"><div style="font-size:18px;font-weight:bold">${s.moy!=null?fmtN(s.moy):'—'}</div><div style="font-size:10px">colis/h</div></td>
+    <td style="${td};background:#f4f6f9"><div style="font-size:18px;font-weight:bold">${f&&aVal(f.presents)?nI(f.presents):'—'}</div><div style="font-size:10px">présents</div></td>
+    <td style="${td};background:#fef3c7"><div style="font-size:18px;font-weight:bold">${s.nbAno}</div><div style="font-size:10px">anomalies</div></td>
+    <td style="${td};background:#f4f6f9"><div style="font-size:18px;font-weight:bold">${s.epiM.length}</div><div style="font-size:10px">manquement(s) EPI</div></td>
+    <td style="${td};background:#f4f6f9"><div style="font-size:18px;font-weight:bold">${s.arret}</div><div style="font-size:10px">min d'arrêt machine</div></td>
+  </tr></table>
+  <ul style="margin:0 0 10px 18px;padding:0;font-size:12px;line-height:1.5">${faitsMarquants(s,f,eq).map(x=>'<li>'+x+'</li>').join('')}</ul>`;
+}
+function htmlFiche(f, avecConc, eq){
+  const c = calcFiche(f); const th='padding:5px 6px'; const t0='padding:5px 6px;text-align:center';
+  const h = (t)=>`<h3 style="color:#1a56a0;font-size:13px;margin:14px 0 8px;border-left:4px solid #1a56a0;padding-left:8px">${t}</h3>`;
+  let out = '';
+  if(f){
+    out += h('👥 Effectif et fin de tri') + `<p style="margin:0 0 4px;font-size:12px">Effectif présent : <b>${aVal(f.presents)?nI(f.presents):'—'}</b></p><p style="margin:0;font-size:12px">${txtTri(f)}</p>`;
+  }
+  out += h('📦 Volumes triés');
+  if(!f || !c.lignes.length){ out += '<p style="color:#9ca3af">Aucun volume saisi.</p>'; }
+  else out += `<table style="width:100%;border-collapse:collapse;font-size:11px">
+    <tr style="background:#1a56a0;color:white"><th style="${th}">Ligne</th><th style="${th}">Début</th><th style="${th}">Fin</th><th style="${th}">Dispersion</th><th style="${th}">Distribution</th><th style="${th}">Total</th></tr>
+    ${c.lignes.map(l=>`<tr style="border-bottom:1px solid #eee"><td style="${t0}">${escHtml(l.nom||'—')}</td><td style="${t0}">${l.debut||'—'}</td><td style="${t0}">${l.fin||'—'}</td><td style="${t0}">${aVal(l.total)?fmtN(nI(l.disp)):'—'}</td><td style="${t0}">${l.distrib==null?'—':fmtN(l.distrib)}</td><td style="${t0};font-weight:bold">${aVal(l.total)?fmtN(nI(l.total)):'—'}</td></tr>`).join('')}
+    <tr style="background:#f4f6f9;font-weight:bold"><td style="${t0}" colspan="3">Total équipe</td><td style="${t0}">${fmtN(c.sumDisp)}</td><td style="${t0}">${fmtN(c.sumDist)}</td><td style="${t0}">${fmtN(c.sumTot)}</td></tr>
+    <tr><td style="${t0}" colspan="5">HN</td><td style="${t0}">${fmtN(c.hn)}</td></tr>
+    <tr style="background:#dcfce7;font-weight:bold"><td style="${t0}" colspan="5">TOTAL COLIS (HN inclus)</td><td style="${t0}">${fmtN(c.totalHN)}</td></tr>
+  </table>`;
+  if(avecConc){
+    out += h('🚚 Concentration — colis chargés');
+    if(!c.liaisons.length) out += '<p style="color:#9ca3af">Aucune liaison saisie.</p>';
+    else out += `<p style="font-size:11px;margin:0 0 6px">Présents : <b>${aVal(f.conc.presents)?nI(f.conc.presents):'—'}</b></p>
+      <table style="width:100%;border-collapse:collapse;font-size:11px">
+      <tr style="background:#0f766e;color:white"><th style="${th}">Liaison</th><th style="${th}">Camion</th><th style="${th}">Début</th><th style="${th}">Fin</th><th style="${th}">Colis chargés</th></tr>
+      ${c.liaisons.map((li,l)=>(li.camions||[]).map((cm,k)=>`<tr style="border-bottom:1px solid #eee"><td style="${t0}">${l+1}</td><td style="${t0}">${k+1}</td><td style="${t0}">${cm.debut||'—'}</td><td style="${t0}">${cm.fin||'—'}</td><td style="${t0}">${aVal(cm.colis)?fmtN(nI(cm.colis)):'—'}</td></tr>`).join('')+`<tr style="background:#f0fdfa;font-weight:bold"><td style="${t0}" colspan="4">Sous-total liaison ${l+1}</td><td style="${t0}">${fmtN(li.somme)}</td></tr>`).join('')}
+      <tr style="background:#ccfbf1;font-weight:bold"><td style="${t0}" colspan="4">TOTAL CHARGÉ CONCENTRATION</td><td style="${t0}">${fmtN(c.totConc)}</td></tr></table>`;
+  }
+  if(f && (f.commentaire||f.passation)) out += h('💬 Commentaire et passation') + (f.commentaire?`<p style="margin:0 0 6px"><b>Événements :</b> ${escHtml(f.commentaire)}</p>`:'') + (f.passation?`<p style="margin:0"><b>Consignes équipe suivante :</b> ${escHtml(f.passation)}</p>`:'');
+  return out;
+}
+function htmlTotauxNuit(fa, fm){
+  const T = totauxNuit(fa, fm); const th='padding:6px'; const t0='padding:6px;text-align:center';
+  const row = (n,x,bg)=>`<tr style="border-bottom:1px solid #eee;${bg?'background:'+bg+';font-weight:bold':''}"><td style="padding:6px">${n}</td><td style="${t0}">${fmtN(x.disp)}</td><td style="${t0}">${fmtN(x.dist)}</td><td style="${t0}">${fmtN(x.hn)}</td><td style="${t0}">${fmtN(x.total)}</td></tr>`;
+  return `<h3 style="color:#1a56a0;font-size:14px;margin:14px 0 8px;border-left:4px solid #1a56a0;padding-left:8px">🧮 Volumes de la nuit</h3>
+  <table style="width:100%;border-collapse:collapse;font-size:12px">
+    <tr style="background:#1a56a0;color:white"><th style="${th};text-align:left"></th><th style="${th}">Dispersion</th><th style="${th}">Distribution</th><th style="${th}">HN</th><th style="${th}">Total colis</th></tr>
+    ${row('🌆 Équipe Aprem',{disp:T.a.sumDisp,dist:T.a.sumDist,hn:T.a.hn,total:T.a.totalHN})}
+    ${row('☀️ Équipe Matin',{disp:T.m.sumDisp,dist:T.m.sumDist,hn:T.m.hn,total:T.m.totalHN})}
+    ${row('TOTAL sans Concentration',T.sans,'#dcfce7')}
+    <tr style="border-bottom:1px solid #eee"><td style="padding:6px">🚚 Concentration (colis chargés)</td><td style="${t0}" colspan="3">—</td><td style="${t0}">${fmtN(T.conc)}</td></tr>
+    <tr style="background:#ccfbf1;font-weight:bold"><td style="padding:6px">TOTAL avec Concentration</td><td style="${t0}" colspan="3">—</td><td style="${t0}">${fmtN(T.avec)}</td></tr>
+  </table>
+  <h3 style="color:#1a56a0;font-size:14px;margin:14px 0 8px;border-left:4px solid #1a56a0;padding-left:8px">👥 Effectifs présents et fin de tri</h3>
+  <table style="width:100%;border-collapse:collapse;font-size:12px">
+    <tr style="background:#1a56a0;color:white"><th style="${th};text-align:left"></th><th style="${th}">Présents</th><th style="${th}">Fin de tri / cible</th></tr>
+    ${[['🌆 Aprem',fa,false],['☀️ Matin',fm,false],['🚚 Concentration',fa,true]].map(([n,f,conc])=>{
+      const pr = f?(conc?f.conc.presents:f.presents):'';
+      const tri = (!conc&&f&&f.fin_tri)?(f.fin_tri+' / '+(f.cible_tri||'—')+(ecartTri(f.fin_tri,f.cible_tri)!=null?' ('+(ecartTri(f.fin_tri,f.cible_tri)<=0?'✅':'⏱ +'+ecartTri(f.fin_tri,f.cible_tri)+' min')+')':'')):'—';
+      return `<tr style="border-bottom:1px solid #eee"><td style="padding:6px">${n}</td><td style="${t0}">${aVal(pr)?nI(pr):'—'}</td><td style="${t0}">${tri}</td></tr>`; }).join('')}
+  </table>`;
+}
+
+
+// ══════════════════════════════════════════════════════════════
+// EXPORT KPI (fichier Excel avec feuilles de données + feuilles d'analyse)
+// ══════════════════════════════════════════════════════════════
+function serialDate(iso){ const p=iso.split('-').map(Number); return Math.round((Date.UTC(p[0],p[1]-1,p[2])-Date.UTC(1899,11,30))/86400000); }
+function lundiIso(iso){ return isoLocal(lundiDe(new Date(iso+'T12:00:00'))); }
+function equipeKpi(eq){ const t=typeEquipe(eq); return t==='aprem'?'Aprem':(t==='matin'?'Matin':(eq||'Autre')); }
+
+function preparerKPI(raw){
+  const P = {vac:[], vol:[], conc:[], rel:[], ano:[], epi:[], kpi:[]};
+  const pour = id => x => String(x.vacation_id)===String(id);
+  const infos = raw.vacs.map(v=>{
+    const colis = raw.colis.filter(pour(v.id)), anos = raw.anos.filter(pour(v.id)), epis = raw.epis.filter(pour(v.id));
+    const ctrls = raw.ctrls.filter(pour(v.id)), fr = raw.fiches.find(pour(v.id)), f = fr?normFiche(fr):null;
+    const tourn = raw.tourn.filter(t=>ctrls.some(c=>c.id===t.controle_id));
+    const score = colis.filter(c=>c.quantite_colis).length + anos.length + epis.filter(e=>e.nom_prenom&&e.nom_prenom!=='RAS').length + ctrls.length
+      + (f ? f.volumes.length + (aVal(f.presents)?1:0) + f.conc.liaisons.length + (f.fin_tri?1:0) : 0);
+    return {v, colis, anos, epis, ctrls, tourn, f, score};
+  }).filter(x=>x.score>0);
+  const best = {};
+  infos.forEach(x=>{ const k=x.v.date+'|'+equipeKpi(x.v.equipe); if(!best[k] || x.score>best[k].score) best[k]=x; });
+  Object.values(best).sort((a,b)=> a.v.date<b.v.date?-1:(a.v.date>b.v.date?1:0)).forEach(x=>{
+    const v = x.v, eq = equipeKpi(v.equipe), lun = lundiIso(v.date), f = x.f, c = calcFiche(f);
+    const ag = raw.agents.find(a=>String(a.id)===String(v.agent_id)); const chef = ag?(ag.prenom+' '+ag.nom):'';
+    const prev = f ? prevusEff(f, v.equipe, false) : prevusEff(null, v.equipe, false);
+    const ecart = f ? ecartTri(f.fin_tri, f.cible_tri) : null;
+    const rel = x.colis.filter(c2=>c2.quantite_colis);
+    const sess = {}; x.colis.forEach(c2=>{ const s=c2.session_numero||1; sess[s]=Math.max(sess[s]||0, c2.arret_machine_cumul||0); });
+    const trnRes = x.tourn.filter(t=>t.resultat);
+    P.vac.push([{d:v.date},{d:lun},eq,chef, (prev==null||!(f&&aVal(f.presents)))?'':prev, f&&aVal(f.presents)?nI(f.presents):'', f&&aVal(f.interim)?nI(f.interim):'',
+      f?f.cible_tri:'', f?f.fin_tri:'', ecart==null?'':ecart, f&&c.lignes.length?c.sumDisp:'', f&&c.lignes.length?c.sumDist:'', f&&aVal(f.hn)?c.hn:'', f&&(c.lignes.length||aVal(f.hn))?c.totalHN:'', '',
+      rel.length?(calcMoyenneColisArchive(x.colis)||''):'', rel.length, rel.filter(c2=>c2.cadence_ok===false).length, Object.values(sess).reduce((a,b)=>a+b,0),
+      x.anos.length, x.epis.filter(e=>e.nom_prenom&&e.nom_prenom!=='RAS').length, trnRes.length, trnRes.filter(t=>t.resultat!=='OK').length]);
+    const hasPres = f && aVal(f.presents);
+    const anoN = code => x.anos.filter(a=>(a.type_anomalie||'AUTRE')===code).length;
+    const tNom = x.anos.filter(a=>!['ERA','PU','SP','MEP'].includes(a.type_anomalie||'AUTRE')).length;
+    P.kpi.push({cle:v.date+'|'+eq, date:v.date, lundi:lun, equipe:eq,
+      prevus: hasPres&&prev!=null?prev:null, presents: hasPres?nI(f.presents):null, interimaires: f&&aVal(f.interim)?nI(f.interim):null,
+      cible_tri: f&&f.cible_tri?f.cible_tri:null, fin_tri: f&&f.fin_tri?f.fin_tri:null, ecart_fin: ecart==null?null:ecart,
+      dispersion: f&&c.lignes.length?c.sumDisp:null, distribution: f&&c.lignes.length?c.sumDist:null, hn: f&&aVal(f.hn)?c.hn:null,
+      total_colis: f&&(c.lignes.length||aVal(f.hn))?c.totalHN:null, colis_charges:null,
+      cadence: rel.length?(calcMoyenneColisArchive(x.colis)||null):null, releves: rel.length, sous_objectif: rel.filter(c2=>c2.cadence_ok===false).length,
+      arret_min: Object.values(sess).reduce((a,b)=>a+b,0), anomalies:x.anos.length, ano_era:anoN('ERA'), ano_pu:anoN('PU'), ano_sp:anoN('SP'), ano_mep:anoN('MEP'), ano_autre:tNom,
+      epi: x.epis.filter(e=>e.nom_prenom&&e.nom_prenom!=='RAS').length, tournees:trnRes.length, tournees_nok:trnRes.filter(t=>t.resultat!=='OK').length});
+    if(f && /^aprem$/i.test(eq) && (aVal(f.conc.presents) || c.liaisons.length)){
+      P.kpi.push({cle:v.date+'|Concentration', date:v.date, lundi:lun, equipe:'Concentration',
+        prevus: aVal(f.conc.presents)?(aVal(f.conc.prevus)?nI(f.conc.prevus):PREVUS_DEFAUT.conc):null, presents: aVal(f.conc.presents)?nI(f.conc.presents):null, interimaires: aVal(f.conc.interim)?nI(f.conc.interim):null,
+        cible_tri:null, fin_tri:null, ecart_fin:null, dispersion:null, distribution:null, hn:null, total_colis:null, colis_charges:c.totConc, cadence:null, releves:0, sous_objectif:0, arret_min:0,
+        anomalies:0, ano_era:0, ano_pu:0, ano_sp:0, ano_mep:0, ano_autre:0, epi:0, tournees:0, tournees_nok:0});
+      P.vac.push([{d:v.date},{d:lun},'Concentration',chef, !aVal(f.conc.presents)?'':(aVal(f.conc.prevus)?nI(f.conc.prevus):PREVUS_DEFAUT.conc), aVal(f.conc.presents)?nI(f.conc.presents):'', aVal(f.conc.interim)?nI(f.conc.interim):'',
+        '','','','','','','', c.totConc, '','','','','','','','']);
+    }
+    c.lignes.forEach(l=>P.vol.push([{d:v.date},{d:lun},eq,l.nom||'',l.debut||'',l.fin||'', aVal(l.total)?nI(l.total):'', aVal(l.total)?nI(l.disp):'', l.distrib==null?'':l.distrib]));
+    if(f && /^aprem$/i.test(eq)) c.liaisons.forEach((li,i)=>(li.camions||[]).forEach((cm,k)=>P.conc.push([{d:v.date},{d:lun},i+1,k+1,cm.debut||'',cm.fin||'', aVal(cm.colis)?nI(cm.colis):''])));
+    rel.forEach(c2=>P.rel.push([{d:v.date},{d:lun},eq,c2.session_numero||1,c2.ligne_numero||1,c2.heure_controle||'',c2.quantite_colis,c2.cadence_ok===false?'NON':'OUI',c2.cadence_ok===false?(c2.raison_non_atteinte||''):'',c2.arret_machine_cumul||0]));
+    x.anos.forEach(a=>P.ano.push([{d:v.date},{d:lun},eq,a.type_anomalie||'AUTRE',a.brin_mep||'',a.description||'']));
+    x.epis.filter(e=>e.nom_prenom&&e.nom_prenom!=='RAS').forEach(e=>P.epi.push([{d:v.date},{d:lun},eq,e.nom_prenom,e.epi_manquant||'',e.solution||'']));
+  });
+  return P;
+}
+
+function construireClasseurKPI(P, from, to){
+  const wb = XLSX.utils.book_new();
+  const FD = 'dd/mm/yyyy';
+  function feuille(entetes, lignes, largeurs){
+    const ws = {};
+    entetes.forEach((h,c)=>{ ws[XLSX.utils.encode_cell({r:0,c})] = {t:'s', v:h}; });
+    lignes.forEach((row,r)=>row.forEach((val,c)=>{
+      if(val===''||val==null) return;
+      const a = XLSX.utils.encode_cell({r:r+1,c});
+      if(typeof val==='object' && val.d) ws[a] = {t:'n', v:serialDate(val.d), z:FD};
+      else if(typeof val==='object' && val.f){ ws[a] = {t:'n', f:val.f}; if(val.z) ws[a].z = val.z; }
+      else if(typeof val==='number') ws[a] = {t:'n', v:val};
+      else ws[a] = {t:'s', v:String(val)};
+    }));
+    ws['!ref'] = XLSX.utils.encode_range({s:{r:0,c:0}, e:{r:Math.max(lignes.length,1), c:entetes.length-1}});
+    ws['!cols'] = entetes.map((h,i)=>({wch: (largeurs&&largeurs[i]) || Math.max(11, Math.min(34, h.length+3))}));
+    return ws;
+  }
+  // 1) Lisez-moi
+  const lm = [
+    'KPI Cahier de vacation — La Poste Mulhouse',
+    'Période exportée : du '+from+' au '+to+' (généré le '+new Date().toLocaleDateString('fr-FR')+')',
+    '',
+    'FEUILLES D\'ANALYSE (calculées automatiquement, une ligne par semaine) :',
+    '  KPI_Effectifs : prévus, présents, intérimaires et absentéisme par équipe',
+    '  KPI_FinTri : heure de fin de tri vs heure cible, ponctualité',
+    '  KPI_Volumes : dispersion, distribution, HN, totaux avec et sans Concentration',
+    '  KPI_Cadence : colis/h moyen, relevés sous objectif, arrêts machine',
+    '  KPI_Anomalies : anomalies par type et manquements EPI',
+    '',
+    'FEUILLES DE DONNÉES (brutes, une ligne par vacation / ligne / camion / anomalie) :',
+    '  Vacations, Volumes, Concentration, Releves, Anomalies, EPI',
+    '',
+    'Les feuilles d\'analyse lisent les feuilles de données : ne supprimez pas leurs colonnes.',
+    'Pour mettre à jour : refaites l\'export dans l\'application (Admin > Export KPI).',
+    'Objectif de cadence : '+OBJECTIF_COLIS+' colis/h. Effectifs prévus : Aprem '+PREVUS_DEFAUT.aprem+', Matin '+PREVUS_DEFAUT.matin+', Concentration '+PREVUS_DEFAUT.conc+'.'
+  ];
+  const wsLm = {}; lm.forEach((t,r)=>{ if(t) wsLm[XLSX.utils.encode_cell({r,c:0})] = {t:'s', v:t}; });
+  wsLm['!ref'] = 'A1:A'+lm.length; wsLm['!cols'] = [{wch:110}];
+  XLSX.utils.book_append_sheet(wb, wsLm, 'Lisez-moi');
+
+  // 2) Feuilles d'analyse
+  const lundis = []; { let d = new Date(lundiIso(from)+'T12:00:00'); const fin = new Date(to+'T12:00:00'); while(d<=fin){ lundis.push(isoLocal(d)); d.setDate(d.getDate()+7); } }
+  const V = 'Vacations!';
+  const col = i => XLSX.utils.encode_col(i);
+  const sumifs = (c,r,team)=>`SUMIFS(${V}$${c}:$${c},${V}$B:$B,$A${r},${V}$C:$C,"${team}")`;
+
+  // Effectifs
+  { const teams=['Aprem','Matin','Concentration']; const H=['Semaine (lundi)']; teams.forEach(t=>H.push(t+' — prévus',t+' — présents',t+' — intérimaires',t+' — absentéisme'));
+    const rows = lundis.map((l,i)=>{ const r=i+2; const row=[{d:l}];
+      teams.forEach((t,k)=>{ const b=1+k*4; row.push({f:sumifs('E',r,t)},{f:sumifs('F',r,t)},{f:sumifs('G',r,t)},{f:`IF(${col(b)}${r}=0,"",(${col(b)}${r}-${col(b+1)}${r})/${col(b)}${r})`, z:'0.0%'}); });
+      return row; });
+    XLSX.utils.book_append_sheet(wb, feuille(H, rows), 'KPI_Effectifs'); }
+  // Fin de tri
+  { const teams=['Aprem','Matin']; const H=['Semaine (lundi)']; teams.forEach(t=>H.push(t+' — fins de tri saisies',t+' — dans les temps',t+' — ponctualité',t+' — écart moyen (min)',t+' — retard moyen si en retard (min)'));
+    const rows = lundis.map((l,i)=>{ const r=i+2; const row=[{d:l}];
+      teams.forEach((t,k)=>{ const b=1+k*5; const base=`${V}$B:$B,$A${r},${V}$C:$C,"${t}"`;
+        row.push({f:`COUNTIFS(${base},${V}$J:$J,">-100000")`},{f:`COUNTIFS(${base},${V}$J:$J,"<=0")`},{f:`IF(${col(b)}${r}=0,"",${col(b+1)}${r}/${col(b)}${r})`, z:'0%'},
+          {f:`IFERROR(AVERAGEIFS(${V}$J:$J,${base}),"")`, z:'0.0'},{f:`IFERROR(AVERAGEIFS(${V}$J:$J,${base},${V}$J:$J,">0"),"")`, z:'0.0'}); });
+      return row; });
+    XLSX.utils.book_append_sheet(wb, feuille(H, rows), 'KPI_FinTri'); }
+  // Volumes
+  { const H=['Semaine (lundi)','Dispersion','Distribution','HN','Total sans Concentration','Colis chargés Concentration','Total avec Concentration','Total Aprem','Total Matin'];
+    const rows = lundis.map((l,i)=>{ const r=i+2; const two=c=>`${sumifs(c,r,'Aprem')}+${sumifs(c,r,'Matin')}`;
+      return [{d:l},{f:two('K')},{f:two('L')},{f:two('M')},{f:two('N')},{f:sumifs('O',r,'Concentration')},{f:`E${r}+F${r}`},{f:sumifs('N',r,'Aprem')},{f:sumifs('N',r,'Matin')}]; });
+    const n = lundis.length+1; rows.push(['TOTAL',...[1,2,3,4,5,6,7,8].map(c=>({f:`SUM(${col(c)}2:${col(c)}${n})`}))]);
+    XLSX.utils.book_append_sheet(wb, feuille(H, rows), 'KPI_Volumes'); }
+  // Cadence
+  { const teams=['Aprem','Matin']; const H=['Semaine (lundi)']; teams.forEach(t=>H.push(t+' — colis/h moyen',t+' — relevés',t+' — % sous objectif',t+' — arrêts machine (min)'));
+    const rows = lundis.map((l,i)=>{ const r=i+2; const row=[{d:l}];
+      teams.forEach((t,k)=>{ const b=1+k*4; row.push({f:`IFERROR(AVERAGEIFS(${V}$P:$P,${V}$B:$B,$A${r},${V}$C:$C,"${t}"),"")`, z:'0'},{f:sumifs('Q',r,t)},
+        {f:`IF(${col(b+1)}${r}=0,"",${sumifs('R',r,t)}/${col(b+1)}${r})`, z:'0%'},{f:sumifs('S',r,t)}); });
+      return row; });
+    XLSX.utils.book_append_sheet(wb, feuille(H, rows), 'KPI_Cadence'); }
+  // Anomalies
+  { const types=TYPES_ANOMALIE.map(t=>t.code); const H=['Semaine (lundi)',...types,'Total anomalies','Manquements EPI'];
+    const rows = lundis.map((l,i)=>{ const r=i+2; return [{d:l}, ...types.map(t=>({f:`COUNTIFS(Anomalies!$B:$B,$A${r},Anomalies!$D:$D,"${t}")`})), {f:`COUNTIFS(Anomalies!$B:$B,$A${r})`}, {f:`COUNTIFS(EPI!$B:$B,$A${r})`}]; });
+    const n = lundis.length+1; rows.push(['TOTAL',...Array.from({length:types.length+2},(_,c)=>({f:`SUM(${col(c+1)}2:${col(c+1)}${n})`}))]);
+    XLSX.utils.book_append_sheet(wb, feuille(H, rows), 'KPI_Anomalies'); }
+
+  // 3) Données
+  XLSX.utils.book_append_sheet(wb, feuille(['Date','Semaine (lundi)','Équipe','Chef d\'équipe','Prévus','Présents','Intérimaires','Cible fin de tri','Fin de tri','Écart fin de tri (min)','Dispersion','Distribution','HN','Total colis (HN inclus)','Colis chargés (Concentration)','Colis/h moyen','Relevés','Relevés sous objectif','Arrêts machine (min)','Anomalies','Manquements EPI','Tournées contrôlées','Tournées non conformes'], P.vac), 'Vacations');
+  XLSX.utils.book_append_sheet(wb, feuille(['Date','Semaine (lundi)','Équipe','Ligne','Début','Fin','Total colis','Dispersion','Distribution'], P.vol), 'Volumes');
+  XLSX.utils.book_append_sheet(wb, feuille(['Date','Semaine (lundi)','Liaison','Camion','Début','Fin','Colis chargés'], P.conc), 'Concentration');
+  XLSX.utils.book_append_sheet(wb, feuille(['Date','Semaine (lundi)','Équipe','Session','Ligne','Heure relevé','Quantité','Cadence OK','Raison si NOK','Arrêt machine cumulé (min)'], P.rel), 'Releves');
+  XLSX.utils.book_append_sheet(wb, feuille(['Date','Semaine (lundi)','Équipe','Type','Précision','Description'], P.ano, [12,14,12,10,22,60]), 'Anomalies');
+  XLSX.utils.book_append_sheet(wb, feuille(['Date','Semaine (lundi)','Équipe','Nom','EPI manquant','Solution'], P.epi, [12,14,12,26,24,40]), 'EPI');
+  wb.Workbook = {CalcPr:{fullCalcOnLoad:true}};
+  return wb;
+}
+
+async function getParLots(table, col, ids, extra){
+  const out = []; for(let i=0;i<ids.length;i+=40){ const lot = ids.slice(i,i+40); out.push(...await db.get(table, `${col}=in.(${lot.join(',')})${extra||''}`)); } return out;
+}
+async function exporterKPI(){
+  const from = document.getElementById('kpi-from').value, to = document.getElementById('kpi-to').value;
+  if(!from||!to||from>to) return toast('Choisissez une période valide','err');
+  if(typeof XLSX==='undefined') return toast('Bibliothèque Excel non chargée (connexion ?)','err');
+  const btn = document.getElementById('kpi-btn'); if(btn){ btn.disabled=true; btn.textContent='⏳ Préparation…'; }
+  try{
+    const vacs = await db.get('vacations_suivi',`date=gte.${from}&date=lte.${to}&select=*&order=date.asc`);
+    const ids = vacs.map(v=>v.id);
+    const raw = {vacs, colis:[], anos:[], epis:[], ctrls:[], tourn:[], fiches:[], agents:[]};
+    if(ids.length){
+      raw.colis = await getParLots('controles_colis','vacation_id',ids,'&select=vacation_id,session_numero,ligne_numero,heure_controle,quantite_colis,cadence_ok,raison_non_atteinte,arret_machine_cumul');
+      raw.anos = await getParLots('anomalies','vacation_id',ids,'&select=vacation_id,type_anomalie,brin_mep,description');
+      raw.epis = await getParLots('epi','vacation_id',ids,'&select=vacation_id,nom_prenom,epi_manquant,solution');
+      raw.ctrls = await getParLots('controles_chantiers','vacation_id',ids,'&select=id,vacation_id');
+      if(raw.ctrls.length) raw.tourn = await getParLots('tournees','controle_id',raw.ctrls.map(c=>c.id),'&select=controle_id,resultat');
+      try{ raw.fiches = await getParLots('fiches_vacation','vacation_id',ids,''); }catch(e){ raw.fiches = []; }
+      raw.agents = await db.get('agents','select=id,prenom,nom');
+    }
+    const P = preparerKPI(raw);
+    if(!P.vac.length){ toast('Aucune donnée sur cette période','err'); return; }
+    const wb = construireClasseurKPI(P, from, to);
+    XLSX.writeFile(wb, `KPI_Cahier_MLH_${from}_${to}.xlsx`);
+    toast(`✅ Fichier généré (${P.vac.length} lignes de vacation)`,'ok');
+  }catch(e){ console.error(e); toast('Erreur export : '+(e.message||e),'err'); }
+  finally{ if(btn){ btn.disabled=false; btn.textContent='📥 Télécharger le fichier Excel KPI'; } }
+}
+function renderExportKPI(){
+  const d = new Date(); d.setDate(d.getDate()-60);
+  return `<div class="card">
+    <div class="card-title">📈 Export KPI (Excel)</div>
+    <div class="info-banner">Génère un fichier Excel avec les feuilles d'analyse (effectifs, fin de tri, volumes, cadence, anomalies) et les données brutes.</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
+      <div><label class="form-label">Du</label><input class="form-input" type="date" id="kpi-from" value="${isoLocal(d)}" /></div>
+      <div><label class="form-label">Au</label><input class="form-input" type="date" id="kpi-to" value="${getToday()}" /></div>
+    </div>
+    <button class="btn-primary" id="kpi-btn" onclick="exporterKPI()">📥 Télécharger le fichier Excel KPI</button>
+  </div>`;
+}
+
+
+// ══════════════════════════════════════════════════════════════
+// KPI AUTOMATIQUES : table kpi_vacations + écran KPI + (Excel via fonction kpi_lire)
+// ══════════════════════════════════════════════════════════════
+function ficheVersRow(f){
+  return {vacation_id:String(S.vacationId), presents:aVal(f.presents)?nI(f.presents):null, prevus:aVal(f.prevus)?nI(f.prevus):null, interimaires:aVal(f.interim)?nI(f.interim):null,
+    fin_tri:f.fin_tri||null, cible_tri:f.cible_tri||null, hn:aVal(f.hn)?nI(f.hn):null, volumes:f.volumes, conc:f.conc, commentaire:f.commentaire, passation:f.passation};
+}
+async function posterKPI(rows){
+  for(let i=0;i<rows.length;i+=50) await db.post('kpi_vacations?on_conflict=cle', rows.slice(i,i+50));
+}
+let _kpiTimer = null;
+function planifierSyncKPI(){ clearTimeout(_kpiTimer); _kpiTimer = setTimeout(syncKPIVacationCourante, 4000); }
+async function syncKPIVacationCourante(){
+  clearTimeout(_kpiTimer); _kpiTimer = null;
+  try{
+    if(!S.vacationId || !S.fiche || S.ficheIndispo) return;
+    const raw = {vacs:[{id:S.vacationId, date:S.date, equipe:S.agent.equipe||'Toutes', agent_id:S.agent.id}],
+      colis:S.colisData||[], anos:S.anomalies||[], epis:S.epiData||[], ctrls:S.controles||[], tourn:S.tournees||[], fiches:[ficheVersRow(S.fiche)], agents:[]};
+    const P = preparerKPI(raw);
+    if(P.kpi.length) await posterKPI(P.kpi);
+  }catch(e){ console.warn('sync KPI', e); }
+}
+async function majKPIPeriode(from, to){
+  const vacs = await db.get('vacations_suivi',`date=gte.${from}&date=lte.${to}&select=*&order=date.asc`);
+  const ids = vacs.map(v=>v.id); if(!ids.length) return 0;
+  const raw = {vacs, colis:[], anos:[], epis:[], ctrls:[], tourn:[], fiches:[], agents:[]};
+  raw.colis = await getParLots('controles_colis','vacation_id',ids,'&select=vacation_id,session_numero,ligne_numero,heure_controle,quantite_colis,cadence_ok,raison_non_atteinte,arret_machine_cumul');
+  raw.anos = await getParLots('anomalies','vacation_id',ids,'&select=vacation_id,type_anomalie');
+  raw.epis = await getParLots('epi','vacation_id',ids,'&select=vacation_id,nom_prenom,epi_manquant,solution');
+  raw.ctrls = await getParLots('controles_chantiers','vacation_id',ids,'&select=id,vacation_id');
+  if(raw.ctrls.length) raw.tourn = await getParLots('tournees','controle_id',raw.ctrls.map(c=>c.id),'&select=controle_id,resultat');
+  try{ raw.fiches = await getParLots('fiches_vacation','vacation_id',ids,''); }catch(e){ raw.fiches = []; }
+  const P = preparerKPI(raw);
+  if(P.kpi.length) await posterKPI(P.kpi);
+  return P.kpi.length;
+}
+
+// ── Définition des indicateurs (valeurs hebdomadaires) ──
+const _sum=(r,k)=>r.reduce((a,x)=>a+(x[k]||0),0);
+const _eq=(r,e)=>r.filter(x=>x.equipe===e);
+const _avg=a=>a.length?a.reduce((s,b)=>s+b,0)/a.length:null;
+const _abs=(r,e)=>{ const q=_eq(r,e).filter(x=>x.presents!=null&&x.prevus); const p=_sum(q,'prevus'); return p?(p-_sum(q,'presents'))/p*100:null; };
+const _pres=(r,e)=>_avg(_eq(r,e).filter(x=>x.presents!=null).map(x=>x.presents));
+const _ponct=(r,e)=>{ const q=_eq(r,e).filter(x=>x.ecart_fin!=null); return q.length?q.filter(x=>x.ecart_fin<=0).length/q.length*100:null; };
+const _ecart=(r,e)=>_avg(_eq(r,e).filter(x=>x.ecart_fin!=null).map(x=>x.ecart_fin));
+const _cad=(r,e)=>_avg(_eq(r,e).filter(x=>x.cadence!=null).map(x=>x.cadence));
+const _sans=r=>_sum(_eq(r,'Aprem'),'total_colis')+_sum(_eq(r,'Matin'),'total_colis');
+const INDIC = [
+  {id:'abs_aprem',g:'👥 Effectifs',l:'Absentéisme Aprem',u:'%',pol:-1,f:r=>_abs(r,'Aprem')},
+  {id:'abs_matin',g:'👥 Effectifs',l:'Absentéisme Matin',u:'%',pol:-1,f:r=>_abs(r,'Matin')},
+  {id:'abs_conc',g:'👥 Effectifs',l:'Absentéisme Concentration',u:'%',pol:-1,f:r=>_abs(r,'Concentration')},
+  {id:'pres_aprem',g:'👥 Effectifs',l:'Présents Aprem (moy./vacation)',u:'',pol:1,f:r=>_pres(r,'Aprem')},
+  {id:'pres_matin',g:'👥 Effectifs',l:'Présents Matin (moy./vacation)',u:'',pol:1,f:r=>_pres(r,'Matin')},
+  {id:'pres_conc',g:'👥 Effectifs',l:'Présents Concentration (moy.)',u:'',pol:1,f:r=>_pres(r,'Concentration')},
+  {id:'interim',g:'👥 Effectifs',l:'Part d\'intérimaires',u:'%',pol:0,f:r=>{ const q=r.filter(x=>x.presents!=null); const p=_sum(q,'presents'); return p?_sum(q,'interimaires')/p*100:null; }},
+  {id:'ponct_aprem',g:'⏱ Fin de tri',l:'Ponctualité Aprem',u:'%',pol:1,f:r=>_ponct(r,'Aprem')},
+  {id:'ponct_matin',g:'⏱ Fin de tri',l:'Ponctualité Matin',u:'%',pol:1,f:r=>_ponct(r,'Matin')},
+  {id:'ecart_aprem',g:'⏱ Fin de tri',l:'Écart moyen Aprem (min)',u:'min',pol:-1,f:r=>_ecart(r,'Aprem')},
+  {id:'ecart_matin',g:'⏱ Fin de tri',l:'Écart moyen Matin (min)',u:'min',pol:-1,f:r=>_ecart(r,'Matin')},
+  {id:'vol_sans',g:'📦 Volumes',l:'Total colis (hors Concentration)',u:'',pol:1,f:r=>_sans(r)},
+  {id:'vol_conc',g:'📦 Volumes',l:'Colis chargés Concentration',u:'',pol:1,f:r=>_sum(_eq(r,'Concentration'),'colis_charges')},
+  {id:'vol_avec',g:'📦 Volumes',l:'Total avec Concentration',u:'',pol:1,f:r=>_sans(r)+_sum(_eq(r,'Concentration'),'colis_charges')},
+  {id:'disp',g:'📦 Volumes',l:'Dispersion',u:'',pol:0,f:r=>_sum(_eq(r,'Aprem'),'dispersion')+_sum(_eq(r,'Matin'),'dispersion')},
+  {id:'dist',g:'📦 Volumes',l:'Distribution',u:'',pol:0,f:r=>_sum(_eq(r,'Aprem'),'distribution')+_sum(_eq(r,'Matin'),'distribution')},
+  {id:'hn',g:'📦 Volumes',l:'HN',u:'',pol:0,f:r=>_sum(_eq(r,'Aprem'),'hn')+_sum(_eq(r,'Matin'),'hn')},
+  {id:'cad_aprem',g:'🚀 Cadence',l:'Colis/h moyen Aprem',u:'',pol:1,f:r=>_cad(r,'Aprem')},
+  {id:'cad_matin',g:'🚀 Cadence',l:'Colis/h moyen Matin',u:'',pol:1,f:r=>_cad(r,'Matin')},
+  {id:'sous_obj',g:'🚀 Cadence',l:'Relevés sous objectif',u:'%',pol:-1,f:r=>{ const p=_sum(r,'releves'); return p?_sum(r,'sous_objectif')/p*100:null; }},
+  {id:'arret',g:'🚀 Cadence',l:'Arrêts machine (min)',u:'min',pol:-1,f:r=>_sum(r,'arret_min')},
+  {id:'ano_total',g:'⚠️ Anomalies',l:'Anomalies — total',u:'',pol:-1,f:r=>_sum(r,'anomalies')},
+  {id:'ano_era',g:'⚠️ Anomalies',l:'ERA',u:'',pol:-1,f:r=>_sum(r,'ano_era')},
+  {id:'ano_pu',g:'⚠️ Anomalies',l:'P.U',u:'',pol:-1,f:r=>_sum(r,'ano_pu')},
+  {id:'ano_sp',g:'⚠️ Anomalies',l:'So Poste',u:'',pol:-1,f:r=>_sum(r,'ano_sp')},
+  {id:'ano_mep',g:'⚠️ Anomalies',l:'Mise en place',u:'',pol:-1,f:r=>_sum(r,'ano_mep')},
+  {id:'ano_autre',g:'⚠️ Anomalies',l:'Autres',u:'',pol:-1,f:r=>_sum(r,'ano_autre')},
+  {id:'epi',g:'⚠️ Anomalies',l:'Manquements EPI',u:'',pol:-1,f:r=>_sum(r,'epi')},
+];
+function addJours(iso,n){ const d=new Date(iso+'T12:00:00'); d.setDate(d.getDate()+n); return isoLocal(d); }
+function agregHebdo(rows){
+  const m = {}; (rows||[]).forEach(r=>{ (m[r.lundi]=m[r.lundi]||[]).push(r); });
+  const out = {}; Object.keys(m).forEach(w=>{ out[w]={}; INDIC.forEach(i=>{ out[w][i.id]=i.f(m[w]); }); });
+  return out;
+}
+function fmtKPI(v,u){
+  if(v==null||isNaN(v)) return '—';
+  if(u==='%') return v.toFixed(1).replace('.',',')+' %';
+  if(u==='min') return (Math.round(v*10)/10).toString().replace('.',',')+' min';
+  return Number.isInteger(v)||Math.abs(v)>=100 ? fmtN(Math.round(v)) : v.toFixed(1).replace('.',',');
+}
+function sparkline(vals, couleur){
+  const v = vals.filter(x=>x!=null); if(v.length<2) return '';
+  const mn=Math.min(...v), mx=Math.max(...v), W=64, H=18; const rg=(mx-mn)||1;
+  const pts = vals.map((x,i)=> x==null?null:[ (i/(vals.length-1))*W, H-2-((x-mn)/rg)*(H-4) ]).filter(Boolean);
+  return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><polyline fill="none" stroke="${couleur}" stroke-width="1.6" points="${pts.map(p=>p[0].toFixed(1)+','+p[1].toFixed(1)).join(' ')}"/></svg>`;
+}
+async function chargerKPI(){
+  try{ S.kpiRows = await db.get('kpi_vacations','select=*&order=date.asc'); S.kpiIndispo = false; }
+  catch(e){ S.kpiRows = []; S.kpiIndispo = true; console.warn('kpi_vacations', e); }
+}
+async function ouvrirKPI(){
+  S.kpiLoading = true; render();
+  try{
+    if(!S.kpiAutoSync){ S.kpiAutoSync = true; try{ await majKPIPeriode(addJours(getToday(),-14), getToday()); }catch(e){ console.warn(e); } }
+    await chargerKPI();
+  }finally{ S.kpiLoading = false; render(); }
+}
+async function recalculerKPI(){
+  const from = document.getElementById('kpi-recalc-from').value; if(!from) return toast('Choisissez une date','err');
+  const btn = document.getElementById('kpi-recalc-btn'); if(btn){ btn.disabled=true; btn.textContent='⏳ Calcul en cours…'; }
+  try{ const n = await majKPIPeriode(from, getToday()); await chargerKPI(); toast(`✅ ${n} ligne(s) recalculée(s)`,'ok'); }
+  catch(e){ console.error(e); toast('Erreur : '+(e.message||e),'err'); }
+  render();
+}
+function choisirSemaineKPI(w){ S.kpiSemaine = w; render(); }
+function renderKPI(){
+  if(S.kpiLoading) return `<div class="card" style="text-align:center;color:var(--texte-doux)">⏳ Calcul des indicateurs…</div>`;
+  const rows = S.kpiRows||[];
+  const recalc = `<div class="card"><div class="card-title">🔄 Mise à jour de l'historique</div>
+    <div class="info-banner">Les KPI se mettent à jour tout seuls pendant les vacations. Utilisez ce bouton pour recalculer les jours passés.</div>
+    <div style="display:flex;gap:8px;align-items:end"><div style="flex:1"><label class="form-label">À partir du</label><input class="form-input" type="date" id="kpi-recalc-from" value="2026-10-01" /></div>
+    <button class="btn-primary" id="kpi-recalc-btn" style="width:auto;padding:10px 14px" onclick="recalculerKPI()">Recalculer</button></div></div>`;
+  if(S.kpiIndispo) return `<div class="card"><div class="info-banner" style="background:#fee2e2;color:#991b1b">⚠️ La table des KPI n'existe pas encore dans Supabase (étape SQL « 5_kpi_automatique.sql » à faire).</div></div>`;
+  if(!rows.length) return recalc+`<div class="card"><div class="empty-state" style="padding:16px;color:var(--texte-doux)">Aucune donnée KPI pour l'instant. Cliquez sur « Recalculer ».</div></div>`;
+  const H = agregHebdo(rows); const weeks = Object.keys(H).sort();
+  const sel = (S.kpiSemaine && H[S.kpiSemaine]) ? S.kpiSemaine : weeks[weeks.length-1];
+  const prec = addJours(sel,-7); const fmtW = w=>new Date(w+'T12:00:00').toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit'});
+  const hist = [7,6,5,4,3,2,1,0].map(k=>addJours(sel,-7*k));
+  let lastG = '';
+  const lignes = INDIC.map(i=>{
+    const cur = H[sel][i.id]; const pr = H[prec]?H[prec][i.id]:null;
+    const quatre = [0,1,2,3].map(k=>H[addJours(sel,-7*k)]?H[addJours(sel,-7*k)][i.id]:null).filter(x=>x!=null);
+    const moy4 = _avg(quatre);
+    let evo = '—', col = '#6b7280', fl = '';
+    if(cur!=null && pr!=null){
+      const diff = cur-pr;
+      if(i.u==='%'||i.u==='min') evo = (diff>0?'+':'')+(Math.round(diff*10)/10).toString().replace('.',',')+(i.u==='%'?' pt':' min');
+      else evo = pr? ((diff>0?'+':'')+(Math.round(diff/pr*1000)/10).toString().replace('.',',')+' %') : (diff>0?'+':'')+fmtN(diff);
+      fl = diff>0?'▲':(diff<0?'▼':'＝');
+      col = i.pol===0||diff===0 ? '#6b7280' : (diff*i.pol>0?'#16a34a':'#dc2626');
+    }
+    const head = i.g!==lastG ? `<tr><td colspan="6" style="background:#eef2f9;font-weight:700;padding:6px 8px;font-size:12px;color:#1a56a0">${i.g}</td></tr>` : ''; lastG = i.g;
+    return head+`<tr style="border-bottom:1px solid #eee"><td style="padding:6px 8px;font-size:12px">${i.l}</td>
+      <td style="padding:6px 4px;text-align:right;font-weight:700;font-size:12px">${fmtKPI(cur,i.u)}</td>
+      <td style="padding:6px 4px;text-align:right;font-size:11px;color:#6b7280">${fmtKPI(pr,i.u)}</td>
+      <td style="padding:6px 4px;text-align:right;font-size:11px;font-weight:700;color:${col};white-space:nowrap">${fl} ${evo}</td>
+      <td style="padding:6px 4px;text-align:right;font-size:11px;color:#6b7280">${fmtKPI(moy4,i.u)}</td>
+      <td style="padding:6px 4px">${sparkline(hist.map(w=>H[w]?H[w][i.id]:null), col==='#6b7280'?'#1a56a0':col)}</td></tr>`;
+  }).join('');
+  return `<div class="card"><div class="card-title">📈 Suivi KPI</div>
+    <label class="form-label">Semaine du (lundi)</label>
+    <select class="form-input" onchange="choisirSemaineKPI(this.value)" style="margin-bottom:8px">${weeks.slice().reverse().map(w=>`<option value="${w}" ${w===sel?'selected':''}>${fmtW(w)} → ${fmtW(addJours(w,6))}</option>`).join('')}</select>
+    <div style="font-size:11px;color:var(--texte-doux);margin-bottom:6px">Évolution = comparaison avec la semaine précédente (${fmtW(prec)}). Vert = mieux, rouge = moins bien. Courbe : 8 dernières semaines.</div>
+    <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;min-width:420px">
+      <tr style="background:#1a56a0;color:white;font-size:11px"><th style="padding:6px 8px;text-align:left">Indicateur</th><th style="padding:6px 4px;text-align:right">Semaine</th><th style="padding:6px 4px;text-align:right">Préc.</th><th style="padding:6px 4px;text-align:right">Évolution</th><th style="padding:6px 4px;text-align:right">Moy. 4 sem.</th><th></th></tr>
+      ${lignes}</table></div></div>${recalc}`;
 }
 
 render();
@@ -2312,6 +3003,7 @@ async function verifierClotureAuto(){
   // Clôture automatique silencieuse
   console.log(`[ClôtureAuto] ${equipe} — ${h}h${String(m).padStart(2,'0')} → clôture automatique`);
   try{
+    try{ await syncKPIVacationCourante(); }catch(e){}
     await db.patch('vacations_suivi',`id=eq.${S.vacationId}`,{terminee:true});
     clearInterval(clotureAutoInterval);
     clotureAutoInterval = null;
@@ -2325,6 +3017,7 @@ async function verifierClotureAuto(){
     S.epiData = [];
     S.anomalies = [];
     S.tournees = [];
+    S.fiche = null;
     S.vue = 'epi';
     render();
   }catch(e){
