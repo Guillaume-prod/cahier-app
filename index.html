@@ -2006,15 +2006,21 @@ async function exporterRapportNuit(dateAprem, dateMatin){
     // Charger les détails de chaque vacation
     async function chargerDetails(vacs){
       if(!vacs.length) return null;
-      const v = vacs[0]; // On prend la première (en cas de doublon)
-      const agent = (S.tousAgents||[]).find(a=>a.id===v.agent_id)||{prenom:'?',nom:'',equipe:v.equipe||''};
-      const controles = await db.get('controles_chantiers',`vacation_id=eq.${v.id}&order=numero.asc`);
-      const colis = await db.get('controles_colis',`vacation_id=eq.${v.id}&order=created_at.asc`);
-      const epi = await db.get('epi',`vacation_id=eq.${v.id}&order=created_at.asc`);
-      const anomalies = await db.get('anomalies',`vacation_id=eq.${v.id}&order=created_at.asc`);
-      const ids = controles.map(c=>c.id);
-      const tournees = ids.length ? await db.get('tournees',`controle_id=in.(${ids.join(',')})&order=numero.asc`) : [];
-      return {vacation:v, agent, controles, colis, epi, anomalies, tournees};
+      // Plusieurs vacations le même jour (ex. une vacation vide créée à la reconnexion) : on garde celle qui contient le plus de saisies
+      let meilleur = null;
+      for(const v of vacs){
+        const agent = (S.tousAgents||[]).find(a=>a.id===v.agent_id)||{prenom:'?',nom:'',equipe:v.equipe||''};
+        const controles = await db.get('controles_chantiers',`vacation_id=eq.${v.id}&order=numero.asc`);
+        const colis = await db.get('controles_colis',`vacation_id=eq.${v.id}&order=created_at.asc`);
+        const epi = await db.get('epi',`vacation_id=eq.${v.id}&order=created_at.asc`);
+        const anomalies = await db.get('anomalies',`vacation_id=eq.${v.id}&order=created_at.asc`);
+        const ids = controles.map(c=>c.id);
+        const tournees = ids.length ? await db.get('tournees',`controle_id=in.(${ids.join(',')})&order=numero.asc`) : [];
+        const score = controles.length + colis.filter(c=>c.quantite_colis).length + epi.length + anomalies.length;
+        if(!meilleur || score > meilleur.score) meilleur = {score, vacation:v, agent, controles, colis, epi, anomalies, tournees};
+      }
+      const {score, ...detail} = meilleur;
+      return detail;
     }
 
     const detailAprem = await chargerDetails(vacsAprem);
