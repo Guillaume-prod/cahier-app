@@ -1999,9 +1999,9 @@ async function exporterRapportNuit(dateAprem, dateMatin){
 
   try{
     // Charger vacation Aprem de J (terminée ou non)
-    const vacsAprem = await db.get('vacations_suivi',`date=eq.${dateAprem}&equipe=eq.Aprem&select=*&order=created_at.desc`);
+    const vacsAprem = await db.get('vacations_suivi',`date=eq.${dateAprem}&equipe=in.(Aprem,Soir%C3%A9e)&select=*&order=created_at.desc`);
     // Charger vacation Matin de J+1 (terminée ou non)
-    const vacsMatin = await db.get('vacations_suivi',`date=eq.${dateMatin}&equipe=eq.Matin&select=*&order=created_at.desc`);
+    const vacsMatin = await db.get('vacations_suivi',`date=eq.${dateMatin}&equipe=in.(Matin,Nuit)&select=*&order=created_at.desc`);
 
     // Charger les détails de chaque vacation
     async function chargerDetails(vacs){
