@@ -827,15 +827,12 @@ function renderColis(){
   const toutesLessions = sessionsExistantes.includes(sessionCourante) ? sessionsExistantes : [...sessionsExistantes, sessionCourante].sort((a,b)=>a-b);
 
   function renderSession(sessNum){
-    // Nombre de lignes = max(5, lignes existantes en DB) + lignes ajoutées localement
-    const lignesEnDB = S.colisData.filter(x=>(x.session_numero||1)===sessNum).map(x=>x.ligne_numero||1);
-    const maxEnDB = lignesEnDB.length ? Math.max(...lignesEnDB) : 0;
-    const nbLignes = Math.max(5, maxEnDB, S.lignesSession?.[sessNum]||0);
-    const lignes = [];
-    for(let i=1;i<=nbLignes;i++){
-      const c = S.colisData.find(x=>(x.session_numero||1)===sessNum&&(x.ligne_numero||1)===i)||{};
-      lignes.push({i, c});
-    }
+    // Lignes affichées = lignes qui contiennent des données + quelques lignes vides à la suite (pas de longue liste de lignes vides)
+    const numsData = lignesAvecDonnees(sessNum);
+    const dernier = numsData.length ? numsData[numsData.length-1] : 0;
+    const nums = numsData.slice();
+    for(let k=1;k<=nbVidesColis(sessNum);k++) nums.push(dernier+k);
+    const lignes = nums.map(i=>({i, c: S.colisData.find(x=>(x.session_numero||1)===sessNum&&(x.ligne_numero||1)===i)||{}}));
     function toMinRender(h){ const [hh,mm]=h.split(':').map(Number); return hh*60+mm; }
     const sorted = lignes.filter(({c})=>c.quantite_colis&&c.heure_controle).map(({c})=>c).sort((a,b)=>{
       let ma=toMinRender(a.heure_controle), mb=toMinRender(b.heure_controle);
@@ -920,12 +917,18 @@ function ajouterSessionColis(){
   render();
 }
 
+function lignesAvecDonnees(sessNum){
+  const nums = S.colisData.filter(x=>(x.session_numero||1)===sessNum && (x.quantite_colis||x.heure_controle||x.quai||x.camion_h_debut||x.arret_machine_cumul||x.raison_non_atteinte)).map(x=>x.ligne_numero||1);
+  return [...new Set(nums)].sort((a,b)=>a-b);
+}
+// Nombre de lignes vides affichées en fin de session : 5 si la session est vide, sinon 2 (le bouton ＋ Ligne en ajoute)
+function nbVidesColis(sessNum){
+  const base = lignesAvecDonnees(sessNum).length ? 2 : 5;
+  return Math.max(base, (S.lignesSession&&S.lignesSession[sessNum])||0);
+}
 function ajouterLigneColis(sessNum){
   if(!S.lignesSession) S.lignesSession = {};
-  const lignesEnDB = S.colisData.filter(x=>(x.session_numero||1)===sessNum).map(x=>x.ligne_numero||1);
-  const maxEnDB = lignesEnDB.length ? Math.max(...lignesEnDB) : 0;
-  const actuel = Math.max(5, maxEnDB, S.lignesSession[sessNum]||0);
-  S.lignesSession[sessNum] = actuel + 1;
+  S.lignesSession[sessNum] = nbVidesColis(sessNum) + 1;
   render();
 }
 
@@ -1854,7 +1857,7 @@ async function genererRecapSemaine(){
   const from = isoLocal(lun), to = isoLocal(dim);
   toast('Chargement de la semaine…','ok');
   try{
-    const vacs = await db.get('vacations_suivi',`date=gte.${from}&date=lte.${to}&select=*&order=date.asc`);
+    let vacs = await db.get('vacations_suivi',`date=gte.${from}&date=lte.${to}&select=*&order=date.asc`);
     if(!vacs.length){ toast('Aucune vacation cette semaine','err'); return; }
     const ids = vacs.map(v=>v.id).join(',');
     const [colis, epi, anos, ctrl, agents] = await Promise.all([
@@ -1866,6 +1869,13 @@ async function genererRecapSemaine(){
     ]);
     let fiches = [];
     try{ fiches = await db.get('fiches_vacation',`vacation_id=in.(${ids})`); }catch(e){ fiches = []; }
+    // On ignore les vacations vides (créées à chaque connexion) et on ne garde qu'une vacation par jour et par équipe (la plus remplie)
+    { const ficheTxt = v=>{ const r = fiches.find(x=>String(x.vacation_id)===String(v.id)); if(!r) return 0; const f = normFiche(r); return f.volumes.length + (aVal(f.presents)?1:0) + f.conc.liaisons.length + (f.fin_tri?1:0); };
+      const score = v => colis.filter(c=>c.vacation_id===v.id&&c.quantite_colis).length + epi.filter(e=>e.vacation_id===v.id&&e.nom_prenom&&e.nom_prenom!=='RAS').length
+        + anos.filter(a=>a.vacation_id===v.id).length + ctrl.filter(c=>c.vacation_id===v.id).length + ficheTxt(v);
+      const best = {}; vacs.forEach(v=>{ const k = v.date+'|'+equipeKpi(v.equipe), n = score(v); if(n>0 && (!best[k] || n>best[k].n)) best[k] = {v,n}; });
+      vacs = Object.values(best).map(x=>x.v).sort((a,b)=>a.date<b.date?-1:(a.date>b.date?1:0));
+      if(!vacs.length){ toast('Aucune saisie cette semaine','err'); return; } }
     const volJ = vacs.map(v=>{ const r = fiches.find(x=>String(x.vacation_id)===String(v.id)); const f = r?normFiche(r):null; const c = calcFiche(f);
       return {v, f, c, aprem:/^(Aprem|Soir)/i.test(v.equipe||'')}; }).filter(x=>x.f && (x.c.lignes.length || aVal(x.f.presents) || x.c.totConc || x.f.fin_tri));
     const wk = volJ.reduce((a,x)=>{ a.disp+=x.c.sumDisp; a.dist+=x.c.sumDist; a.hn+=x.c.hn; a.total+=x.c.totalHN; a.conc+=x.c.totConc; return a; },{disp:0,dist:0,hn:0,total:0,conc:0});
