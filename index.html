@@ -1961,14 +1961,7 @@ async function genererRecapSemaine(){
           return `<tr style="border-bottom:1px solid #eee"><td style="padding:5px 8px;font-weight:700;color:${t.couleur}">${escHtml(t.label)}</td><td style="padding:5px 8px;text-align:center">${l.filter(a=>eqOf(a)==='aprem').length}</td><td style="padding:5px 8px;text-align:center">${l.filter(a=>eqOf(a)==='matin').length}</td><td style="padding:5px 8px;text-align:center;font-weight:700">${l.length}</td></tr>`; }).join('')}
         <tr style="background:#fef3c7;font-weight:700"><td style="padding:5px 8px">Total</td><td style="padding:5px 8px;text-align:center">${anos.filter(a=>{ const v=vacs.find(z=>String(z.id)===String(a.vacation_id)); return typeEquipe(v&&v.equipe)==='aprem'; }).length}</td><td style="padding:5px 8px;text-align:center">${anos.filter(a=>{ const v=vacs.find(z=>String(z.id)===String(a.vacation_id)); return typeEquipe(v&&v.equipe)==='matin'; }).length}</td><td style="padding:5px 8px;text-align:center">${anos.length}</td></tr>
       </table>
-      <h3 style="color:#d97706;font-size:12px;margin:10px 0 6px">Motifs remontés (regroupés)</h3>
-      <table style="width:100%;border-collapse:collapse;font-size:11px">
-        <tr style="background:#d97706;color:white"><th style="${th}">Type</th><th style="${th};text-align:center">Nb</th><th style="${th}">Précision</th><th style="${th}">Raison</th></tr>
-        ${(()=>{ const g={}; anos.forEach(a=>{ const t=TYPES_ANOMALIE.find(z=>z.code===a.type_anomalie)||TYPES_ANOMALIE[TYPES_ANOMALIE.length-1]; const pr=precisionAno(a); const raison=(a.description||'').trim().replace(/\s+/g,' ');
-              const k=t.code+'|'+pr.toLowerCase()+'|'+raison.toLowerCase(); (g[k]=g[k]||{t,pr,raison,n:0}).n++; });
-            const ordre=Object.values(g).sort((x,y)=>TYPES_ANOMALIE.indexOf(x.t)-TYPES_ANOMALIE.indexOf(y.t)||y.n-x.n);
-            return ordre.map(x=>`<tr style="border-bottom:1px solid #eee;vertical-align:top"><td style="padding:5px 6px;font-weight:700;color:${x.t.couleur};white-space:nowrap">${escHtml(x.t.label)}</td><td style="padding:5px 6px;text-align:center;font-weight:700">${x.n}</td><td style="padding:5px 6px">${escHtml(x.pr)}</td><td style="padding:5px 6px">${escHtml(x.raison?(x.raison.length>160?x.raison.slice(0,157)+'…':x.raison):'—')}</td></tr>`).join(''); })()}
-      </table>`:'<p style="color:#16a34a;font-weight:bold">✅ Aucune anomalie signalée cette semaine.</p>'}
+`:'<p style="color:#16a34a;font-weight:bold">✅ Aucune anomalie signalée cette semaine.</p>'}
 
       <h2 style="color:#1a56a0;font-size:14px;margin:16px 0 8px;border-left:4px solid #1a56a0;padding-left:8px">🦺 EPI</h2>
       ${epiManq.length?`<table style="width:100%;border-collapse:collapse"><tr style="background:#1a56a0;color:white"><th style="${th}">Jour</th><th style="${th}">Nom</th><th style="${th}">EPI manquant</th><th style="${th}">Solution</th></tr>
