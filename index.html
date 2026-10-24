@@ -2310,7 +2310,7 @@ async function exporterRapportNuit(dateAprem, dateMatin){
 // ══════════════════════════════════════════════════════════════
 const PREVUS_DEFAUT = {aprem:20, matin:20, conc:8};
 function typeEquipe(eq){ return /Aprem|Soir/i.test(eq||'')?'aprem':(/Matin|Nuit/i.test(eq||'')?'matin':null); }
-function ficheVide(){ return {presents:'', prevus:'', interim:'', fin_tri:'', cible_tri:'', hn:'', volumes:[], conc:{presents:'', prevus:'', interim:'', liaisons:[]}, commentaire:'', passation:''}; }
+function ficheVide(){ return {absents:[], presents:'', prevus:'', interim:'', fin_tri:'', cible_tri:'', hn:'', volumes:[], conc:{presents:'', prevus:'', interim:'', liaisons:[]}, commentaire:'', passation:''}; }
 function nI(v){ const n=parseInt(v,10); return isNaN(n)?0:n; }
 function aVal(v){ return v!==''&&v!=null&&!isNaN(parseInt(v,10)); }
 function normFiche(r){
@@ -2318,6 +2318,7 @@ function normFiche(r){
   f.presents = r.presents==null?'':r.presents; f.hn = r.hn==null?'':r.hn;
   f.prevus = r.prevus==null?'':r.prevus; f.interim = r.interimaires==null?'':r.interimaires;
   f.fin_tri = r.fin_tri||''; f.cible_tri = r.cible_tri||'';
+  f.absents = Array.isArray(r.absents)?r.absents:[];
   f.volumes = Array.isArray(r.volumes)?r.volumes:[];
   f.conc = (r.conc && typeof r.conc==='object') ? Object.assign({presents:'',prevus:'',interim:'',liaisons:[]}, r.conc) : {presents:'',prevus:'',interim:'',liaisons:[]};
   if(!Array.isArray(f.conc.liaisons)) f.conc.liaisons=[];
@@ -2330,14 +2331,22 @@ function prevusEff(f, eq, conc){
   if(conc) return PREVUS_DEFAUT.conc;
   const t = typeEquipe(eq); return t?PREVUS_DEFAUT[t]:null;
 }
-function kpiEff(presents, prevus, interim){
+// Absents = noms saisis (interne) sinon déduit des présents.
+function effAbs(f, prevus, presents){
+  const vac = 0;
+  const base = prevus==null?null:prevus;
+  const noms = f&&Array.isArray(f.absents)?f.absents.filter(a=>a&&a.nom&&a.nom.trim()).length:0;
+  const absN = base==null||!aVal(presents)?null:(noms>0?noms:Math.max(0, base-nI(presents)));
+  return {vac, base, absN, noms};
+}
+function kpiEff(presents, prevus, interim, f){
   if(!aVal(presents)||prevus==null) return null;
-  const p = nI(presents);
-  return {presents:p, prevus, interim:aVal(interim)?nI(interim):null, ecart:p-prevus, abs: prevus>0?Math.max(0,Math.round((prevus-p)/prevus*1000)/10):0};
+  const p = nI(presents); const e = effAbs(f, prevus, presents);
+  return {presents:p, prevus, interim:aVal(interim)?nI(interim):null, ecart:p-prevus, vac:e.vac, abs: e.base>0?Math.round(e.absN/e.base*1000)/10:0, absN:e.absN};
 }
 function txtEff(k){
   if(!k) return '—';
-  return `${k.presents} présents / ${k.prevus} prévus — écart ${k.ecart>0?'+':''}${k.ecart} — absentéisme ${String(k.abs).replace('.',',')} %${k.interim!=null?' — dont '+k.interim+' intérimaire(s)':''}`;
+  return `${k.presents} présents / ${k.prevus} prévus — écart ${k.ecart>0?'+':''}${k.ecart} — absentéisme ${String(k.abs).replace('.',',')} %${k.absN?' ('+k.absN+' absent'+(k.absN>1?'s':'')+')':''}${k.interim!=null?' — dont '+k.interim+' intérimaire(s)':''}`;
 }
 function minHeure(h){ if(!h) return null; const x=h.split(':').map(Number); return x[0]*60+x[1]; }
 function ecartTri(fin, cible){
@@ -2368,7 +2377,7 @@ function totauxNuit(fa, fm){
   return {a, m, sans, conc:a.totConc, avec: sans.total + a.totConc};
 }
 async function chargerFiche(){
-  S.ficheIndispo = false;
+  S.ficheIndispo = false; chargerNomsAbsents().then(()=>{ if(S.fiche) render(); });
   if(!S.vacationId){ S.fiche = null; return; }
   try{
     const r = await db.get('fiches_vacation',`vacation_id=eq.${S.vacationId}`);
@@ -2389,7 +2398,7 @@ async function sauverFiche(){
   const f = S.fiche;
   try{
     await db.post('fiches_vacation?on_conflict=vacation_id', {
-      vacation_id:String(S.vacationId), presents: aVal(f.presents)?nI(f.presents):null, prevus: aVal(f.prevus)?nI(f.prevus):null, interimaires: aVal(f.interim)?nI(f.interim):null, fin_tri:f.fin_tri||null, cible_tri:f.cible_tri||null, hn: aVal(f.hn)?nI(f.hn):null,
+      vacation_id:String(S.vacationId), presents: aVal(f.presents)?nI(f.presents):null, prevus: aVal(f.prevus)?nI(f.prevus):null, interimaires: aVal(f.interim)?nI(f.interim):null, fin_tri:f.fin_tri||null, cible_tri:f.cible_tri||null, hn: aVal(f.hn)?nI(f.hn):null, absents:f.absents||[],
       volumes:f.volumes, conc:f.conc, commentaire:f.commentaire||'', passation:f.passation||'', updated_at:new Date().toISOString()
     });
     const el = document.getElementById('fiche-statut'); if(el) el.textContent = '✅ Enregistré';
@@ -2407,6 +2416,35 @@ function fSet(path, val){
   rafraichirFiche(); planifierSaveFiche();
 }
 function fStruct(fn){ if(!S.fiche) S.fiche = ficheVide(); fn(S.fiche); render(); planifierSaveFiche(); }
+
+// ── Absents (interne : jamais dans les rapports) ──
+const MOTIFS_ABS = ['Maladie','Congé','Absence non justifiée','Accident du travail','Formation','Autre'];
+function normNom(n){ return String(n||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim().split(' ').sort().join(' '); }
+function nomCanon(n){ const k=normNom(n); if(!k) return ''; return (S.nomsAbs||{})[k] || n.trim().replace(/\s+/g,' '); }
+async function chargerNomsAbsents(){
+  if(S.nomsAbs) return; S.nomsAbs = {};
+  try{
+    const r = await db.get('fiches_vacation','select=absents&absents=not.is.null&order=updated_at.desc&limit=500');
+    r.forEach(x=>(x.absents||[]).forEach(a=>{ if(a&&a.nom&&a.nom.trim()){ const k=normNom(a.nom); if(!S.nomsAbs[k]) S.nomsAbs[k]=a.nom.trim().replace(/\s+/g,' '); } }));
+  }catch(e){ console.warn('noms absents', e); }
+}
+function htmlAbsents(f){
+  const inp = 'padding:8px 6px;border:1.5px solid var(--gris-bord);border-radius:8px;font-size:13px;background:white;box-sizing:border-box;width:100%';
+  const lst = Object.values(S.nomsAbs||{}).sort().map(n=>`<option value="${escHtml(n)}">`).join('');
+  const ab = f.absents||[];
+  return `<div style="margin-top:10px;border-top:1px dashed #cbd5e1;padding-top:8px">
+    <div style="font-weight:700;font-size:13px">🔒 Absents <span style="font-weight:400;font-size:11px;color:var(--texte-doux)">— interne, n'apparaît dans aucun rapport</span></div>
+    <datalist id="liste-noms-abs">${lst}</datalist>
+    ${ab.map((a,i)=>`<div style="display:grid;grid-template-columns:1.4fr 1fr auto;gap:6px;margin-top:6px">
+      <input type="text" list="liste-noms-abs" style="${inp}" placeholder="Nom Prénom" value="${escHtml(a.nom||'')}" oninput="fSet('absents.${i}.nom',this.value)" onchange="fNomAbs(${i},this.value)" />
+      <select style="${inp}" onchange="fSet('absents.${i}.motif',this.value)">${MOTIFS_ABS.map(m=>`<option ${a.motif===m?'selected':''}>${m}</option>`).join('')}</select>
+      <button onclick="fDelAbsent(${i})" style="padding:6px 10px;background:#fee2e2;color:#dc2626;border:1.5px solid #dc2626;border-radius:8px;font-weight:700">🗑</button></div>`).join('')}
+    <button onclick="fAddAbsent()" style="margin-top:8px;padding:8px 12px;background:#e8f0fb;color:var(--bleu);border:1.5px solid var(--bleu);border-radius:8px;font-weight:700;font-size:12px">+ Ajouter un absent</button>
+  </div>`;
+}
+function fAddAbsent(){ fStruct(f=>{ f.absents=f.absents||[]; f.absents.push({nom:'',motif:MOTIFS_ABS[0]}); }); }
+function fDelAbsent(i){ fStruct(f=>f.absents.splice(i,1)); }
+function fNomAbs(i,v){ const c=nomCanon(v); if(S.fiche.absents[i]){ S.fiche.absents[i].nom=c; const k=normNom(c); if(k){ S.nomsAbs=S.nomsAbs||{}; if(!S.nomsAbs[k]) S.nomsAbs[k]=c; } } render(); planifierSaveFiche(); }
 function fAddLigne(){ fStruct(f=>f.volumes.push({nom:'Ligne '+(f.volumes.length+1), debut:'', fin:'', total:'', disp:''})); }
 function fDelLigne(i){ if(!confirm('Supprimer cette ligne ?')) return; fStruct(f=>f.volumes.splice(i,1)); }
 function fAddLiaison(){ fStruct(f=>{ if(f.conc.liaisons.length<4) f.conc.liaisons.push({camions:[{debut:'',fin:'',colis:''}]}); }); }
@@ -2420,7 +2458,7 @@ function rafraichirFiche(){
   set('f-sumDisp',fmtN(c.sumDisp)); set('f-sumDist',fmtN(c.sumDist)); set('f-sumTot',fmtN(c.sumTot)); set('f-totalHN',fmtN(c.totalHN));
   c.liaisons.forEach((li,i)=>set('fl-'+i, fmtN(li.somme))); set('f-totConc',fmtN(c.totConc));
   const eq = S.agent.equipe||'';
-  set('f-eff', txtEff(kpiEff(S.fiche.presents, prevusEff(S.fiche,eq,false), S.fiche.interim)));
+  set('f-eff', txtEff(kpiEff(S.fiche.presents, prevusEff(S.fiche,eq,false), S.fiche.interim, S.fiche)));
   set('fc-eff', txtEff(kpiEff(S.fiche.conc.presents, prevusEff(S.fiche,eq,true), S.fiche.conc.interim)));
   set('f-tri', txtTri(S.fiche));
 }
@@ -2443,7 +2481,8 @@ function renderFiche(){
         <div><label style="${lbl}">Présents</label><input type="number" inputmode="numeric" min="0" style="${inp}" value="${f.presents}" oninput="fSet('presents',this.value)" /></div>
         <div><label style="${lbl}">dont intérimaires</label><input type="number" inputmode="numeric" min="0" style="${inp}" value="${f.interim}" oninput="fSet('interim',this.value)" /></div>
       </div>
-      <div id="f-eff" style="font-size:12px;margin-top:8px;color:var(--bleu);font-weight:600">${txtEff(kpiEff(f.presents, prevusEff(f,eq,false), f.interim))}</div>
+      <div id="f-eff" style="font-size:12px;margin-top:8px;color:var(--bleu);font-weight:600">${txtEff(kpiEff(f.presents, prevusEff(f,eq,false), f.interim, f))}</div>
+      ${htmlAbsents(f)}
     </div>
 
     <div style="${box}">
@@ -2650,7 +2689,9 @@ function preparerKPI(raw){
     const hasPres = f && aVal(f.presents);
     const anoN = code => x.anos.filter(a=>(a.type_anomalie||'AUTRE')===code).length;
     const tNom = x.anos.filter(a=>!['ERA','PU','SP','MEP','FACTEO'].includes(a.type_anomalie||'AUTRE')).length;
+    const ea = hasPres&&prev!=null?effAbs(f, prev, f.presents):null;
     P.kpi.push({cle:v.date+'|'+eq, date:v.date, lundi:lun, equipe:eq,
+      absents: ea?ea.absN:null, base_eff: ea?ea.base:null,
       prevus: hasPres&&prev!=null?prev:null, presents: hasPres?nI(f.presents):null, interimaires: f&&aVal(f.interim)?nI(f.interim):null,
       cible_tri: f&&f.cible_tri?f.cible_tri:null, fin_tri: f&&f.fin_tri?f.fin_tri:null, ecart_fin: ecart==null?null:ecart,
       dispersion: f&&c.lignes.length?c.sumDisp:null, distribution: f&&c.lignes.length?c.sumDist:null, hn: f&&aVal(f.hn)?c.hn:null,
@@ -2662,7 +2703,8 @@ function preparerKPI(raw){
       P.kpi.push({cle:v.date+'|Concentration', date:v.date, lundi:lun, equipe:'Concentration',
         prevus: aVal(f.conc.presents)?(aVal(f.conc.prevus)?nI(f.conc.prevus):PREVUS_DEFAUT.conc):null, presents: aVal(f.conc.presents)?nI(f.conc.presents):null, interimaires: aVal(f.conc.interim)?nI(f.conc.interim):null,
         cible_tri:null, fin_tri:null, ecart_fin:null, dispersion:null, distribution:null, hn:null, total_colis:null, colis_charges:c.totConc, cadence:null, releves:0, sous_objectif:0, arret_min:0,
-        anomalies:0, ano_era:0, ano_pu:0, ano_sp:0, ano_mep:0, ano_facteo:0, ano_autre:0, epi:0, tournees:0, tournees_nok:0});
+        anomalies:0, ano_era:0, ano_pu:0, ano_sp:0, ano_mep:0, ano_facteo:0, ano_autre:0, epi:0, tournees:0, tournees_nok:0,
+        absents: aVal(f.conc.presents)?Math.max(0,(aVal(f.conc.prevus)?nI(f.conc.prevus):PREVUS_DEFAUT.conc)-nI(f.conc.presents)):null, base_eff: aVal(f.conc.presents)?(aVal(f.conc.prevus)?nI(f.conc.prevus):PREVUS_DEFAUT.conc):null});
       P.vac.push([{d:v.date},{d:lun},'Concentration',chef, !aVal(f.conc.presents)?'':(aVal(f.conc.prevus)?nI(f.conc.prevus):PREVUS_DEFAUT.conc), aVal(f.conc.presents)?nI(f.conc.presents):'', aVal(f.conc.interim)?nI(f.conc.interim):'',
         '','','','','','','', c.totConc, '','','','','','','','']);
     }
@@ -2814,7 +2856,7 @@ function renderExportKPI(){
 // ══════════════════════════════════════════════════════════════
 function ficheVersRow(f){
   return {vacation_id:String(S.vacationId), presents:aVal(f.presents)?nI(f.presents):null, prevus:aVal(f.prevus)?nI(f.prevus):null, interimaires:aVal(f.interim)?nI(f.interim):null,
-    fin_tri:f.fin_tri||null, cible_tri:f.cible_tri||null, hn:aVal(f.hn)?nI(f.hn):null, volumes:f.volumes, conc:f.conc, commentaire:f.commentaire, passation:f.passation};
+    fin_tri:f.fin_tri||null, cible_tri:f.cible_tri||null, hn:aVal(f.hn)?nI(f.hn):null, absents:f.absents||[], volumes:f.volumes, conc:f.conc, commentaire:f.commentaire, passation:f.passation};
 }
 async function posterKPI(rows){
   for(let i=0;i<rows.length;i+=50) await db.post('kpi_vacations?on_conflict=cle', rows.slice(i,i+50));
@@ -2850,7 +2892,7 @@ async function majKPIPeriode(from, to){
 const _sum=(r,k)=>r.reduce((a,x)=>a+(x[k]||0),0);
 const _eq=(r,e)=>r.filter(x=>x.equipe===e);
 const _avg=a=>a.length?a.reduce((s,b)=>s+b,0)/a.length:null;
-const _abs=(r,e)=>{ const q=_eq(r,e).filter(x=>x.presents!=null&&x.prevus); const p=_sum(q,'prevus'); return p?(p-_sum(q,'presents'))/p*100:null; };
+const _abs=(r,e)=>{ const q=_eq(r,e).filter(x=>x.presents!=null&&x.prevus); const nn=x=>x.base_eff!=null?x.base_eff:x.prevus; const aa=x=>x.absents!=null?x.absents:Math.max(0,x.prevus-x.presents); const p=q.reduce((a,x)=>a+nn(x),0); return p?q.reduce((a,x)=>a+aa(x),0)/p*100:null; };
 const _pres=(r,e)=>_avg(_eq(r,e).filter(x=>x.presents!=null).map(x=>x.presents));
 const _ponct=(r,e)=>{ const q=_eq(r,e).filter(x=>x.ecart_fin!=null); return q.length?q.filter(x=>x.ecart_fin<=0).length/q.length*100:null; };
 const _ecart=(r,e)=>_avg(_eq(r,e).filter(x=>x.ecart_fin!=null).map(x=>x.ecart_fin));
@@ -2919,11 +2961,34 @@ async function ouvrirKPI(){
 async function recalculerKPI(){
   const from = document.getElementById('kpi-recalc-from').value; if(!from) return toast('Choisissez une date','err');
   const btn = document.getElementById('kpi-recalc-btn'); if(btn){ btn.disabled=true; btn.textContent='⏳ Calcul en cours…'; }
-  try{ const n = await majKPIPeriode(from, getToday()); await chargerKPI(); toast(`✅ ${n} ligne(s) recalculée(s)`,'ok'); }
+  try{ const n = await majKPIPeriode(from, getToday()); await chargerKPI(); S.absPers=null; toast(`✅ ${n} ligne(s) recalculée(s)`,'ok'); }
   catch(e){ console.error(e); toast('Erreur : '+(e.message||e),'err'); }
   render();
 }
 function choisirSemaineKPI(w){ S.kpiSemaine = w; render(); }
+async function chargerAbsencesPersonnes(){
+  if(S.absPers) return;
+  S.absPers = {lignes:[]};
+  try{
+    const fs = await db.get('fiches_vacation','select=vacation_id,absents&absents=not.is.null&order=updated_at.desc&limit=1000');
+    const avec = fs.filter(x=>Array.isArray(x.absents)&&x.absents.some(a=>a&&a.nom&&a.nom.trim()));
+    if(!avec.length){ render(); return; }
+    const vs = await getParLots('vacations_suivi','id',avec.map(x=>x.vacation_id),'&select=id,date,equipe');
+    const seen = {}, per = {};
+    avec.forEach(x=>{ const v=vs.find(z=>String(z.id)===String(x.vacation_id)); if(!v) return;
+      x.absents.forEach(a=>{ if(!a||!a.nom||!a.nom.trim()) return; const k=normNom(a.nom); const dk=v.date+'|'+equipeKpi(v.equipe)+'|'+k; if(seen[dk]) return; seen[dk]=1;
+        const o=per[k]=per[k]||{nom:a.nom.trim(),n:0,motifs:{},der:'',dates:[]}; o.n++; o.motifs[a.motif||'Autre']=(o.motifs[a.motif||'Autre']||0)+1; if(v.date>o.der) o.der=v.date; }); });
+    S.absPers = {lignes:Object.values(per).sort((a,b)=>b.n-a.n||a.nom.localeCompare(b.nom))};
+  }catch(e){ console.warn('absences', e); }
+  render();
+}
+function htmlAbsencesPersonnes(){
+  if(!S.absPers){ chargerAbsencesPersonnes(); return ''; }
+  const L = S.absPers.lignes; if(!L.length) return `<div class="card"><div class="card-title">🔒 Absences par personne</div><div style="font-size:12px;color:var(--texte-doux)">Aucun absent saisi pour l'instant (champ « Absents » de la fiche de vacation).</div></div>`;
+  return `<div class="card"><div class="card-title">🔒 Absences par personne <span style="font-size:11px;font-weight:400;color:var(--texte-doux);margin-left:auto">interne</span></div>
+    <table style="width:100%;border-collapse:collapse;font-size:12px"><tr style="background:#1a56a0;color:white"><th style="padding:6px;text-align:left">Personne</th><th style="padding:6px;text-align:center">Jours</th><th style="padding:6px;text-align:left">Motifs</th><th style="padding:6px;text-align:right">Dernier</th></tr>
+    ${L.map(o=>`<tr style="border-bottom:1px solid #eee"><td style="padding:6px;font-weight:600">${escHtml(o.nom)}</td><td style="padding:6px;text-align:center;font-weight:700">${o.n}</td><td style="padding:6px">${Object.entries(o.motifs).map(([m,n])=>escHtml(m)+' ×'+n).join(', ')}</td><td style="padding:6px;text-align:right">${new Date(o.der+'T12:00:00').toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit'})}</td></tr>`).join('')}</table></div>`;
+}
 function renderKPI(){
   if(S.kpiLoading) return `<div class="card" style="text-align:center;color:var(--texte-doux)">⏳ Calcul des indicateurs…</div>`;
   const rows = S.kpiRows||[];
@@ -2964,7 +3029,7 @@ function renderKPI(){
     <div style="font-size:11px;color:var(--texte-doux);margin-bottom:6px">Évolution = comparaison avec la semaine précédente (${fmtW(prec)}). Vert = mieux, rouge = moins bien. Courbe : 8 dernières semaines.</div>
     <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;min-width:420px">
       <tr style="background:#1a56a0;color:white;font-size:11px"><th style="padding:6px 8px;text-align:left">Indicateur</th><th style="padding:6px 4px;text-align:right">Semaine</th><th style="padding:6px 4px;text-align:right">Préc.</th><th style="padding:6px 4px;text-align:right">Évolution</th><th style="padding:6px 4px;text-align:right">Moy. 4 sem.</th><th></th></tr>
-      ${lignes}</table></div></div>${recalc}`;
+      ${lignes}</table></div></div>${htmlAbsencesPersonnes()}${recalc}`;
 }
 
 render();
