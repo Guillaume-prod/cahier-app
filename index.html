@@ -1741,7 +1741,7 @@ async function supprimerPhotoAnomalie(id){
 function renderPDF(){
   const moy = calcMoyenneColis();
   // Date J-1 pour le rapport de nuit (Aprem J-1 + Matin J)
-  const dateAprem = S.date; // par défaut : date courante de la session
+  const dateAprem = (S.agent.equipe==='Matin' && !S.agent.est_responsable) ? apremDe(S.date) : S.date; // chef du Matin : Aprem de la nuit précédente (le samedi pour un lundi)
   return `<div class="card">
     <div class="card-title">📄 Export du cahier</div>
     <div class="info-banner">Génère un PDF complet du cahier de vacation pour la date sélectionnée.</div>
@@ -1762,7 +1762,7 @@ function renderPDF(){
     <div style="margin-bottom:12px">
       <label class="form-label">📅 Date de l'Aprem (J)</label>
       <input class="form-input" type="date" id="date-rapport-nuit" value="${dateAprem}" />
-      <div style="font-size:11px;color:var(--texte-doux);margin-top:4px">Le Matin correspondant sera automatiquement celui du lendemain (J+1)</div>
+      <div style="font-size:11px;color:var(--texte-doux);margin-top:4px">Le Matin correspondant est celui du lendemain (pour un Aprem du samedi : le Matin du lundi)</div>
     </div>
     <button class="btn-primary" style="background:#6366f1" onclick="confirmerRapportNuit()">🌙 Générer le rapport de nuit</button>
   </div>`;
@@ -1843,7 +1843,7 @@ function renderSemaine(){
   const lun = lundiDe(new Date(S.date||getToday()));
   return `<div class="card">
     <div class="card-title">📊 Récapitulatif de la semaine</div>
-    <div class="info-banner">À générer le samedi matin, en fin de vacation. Résume toutes les équipes du lundi au samedi : colis/h, anomalies, EPI. Le PDF se partage directement par mail.</div>
+    <div class="info-banner">À générer le samedi matin, en fin de vacation. Résume la semaine : colis/h, anomalies, EPI, volumes. L'Aprem du samedi est compté dans la semaine suivante (avec le Matin du lundi). Le PDF se partage directement par mail.</div>
     <div class="form-group"><label class="form-label">Semaine du lundi</label>
       <input type="date" class="form-input" id="sem-lundi" value="${isoLocal(lun)}" /></div>
     <button class="btn-primary" onclick="genererRecapSemaine()">📊 Générer le récap de la semaine</button>
@@ -1857,7 +1857,9 @@ async function genererRecapSemaine(){
   const from = isoLocal(lun), to = isoLocal(dim);
   toast('Chargement de la semaine…','ok');
   try{
-    let vacs = await db.get('vacations_suivi',`date=gte.${from}&date=lte.${to}&select=*&order=date.asc`);
+    // Aprem : du samedi précédent au vendredi (l'Aprem du samedi suivant appartient à la semaine suivante) ; Matin et autres : du lundi au dimanche
+    let vacs = await db.get('vacations_suivi',`date=gte.${addJours(from,-2)}&date=lte.${to}&select=*&order=date.asc`);
+    vacs = vacs.filter(v=> typeEquipe(v.equipe)==='aprem' ? (v.date>=addJours(from,-2) && v.date<=addJours(from,4)) : (v.date>=from && v.date<=to));
     if(!vacs.length){ toast('Aucune vacation cette semaine','err'); return; }
     const ids = vacs.map(v=>v.id).join(',');
     const [colis, epi, anos, ctrl, agents] = await Promise.all([
@@ -2065,15 +2067,20 @@ function fermerPDF(){
 }
 
 // ── RAPPORT DE NUIT CONSOLIDÉ ────────────────────────────────────
+// Jours de la « nuit » : l'Aprem du jour J est associé au Matin du lendemain ; l'Aprem du samedi est associé au Matin du lundi
+function jourSemaine(iso){ return new Date(iso+'T12:00:00').getDay(); }
+function matinDe(dateAprem){ return addJours(dateAprem, jourSemaine(dateAprem)===6 ? 2 : 1); }
+function apremDe(dateMatin){ return addJours(dateMatin, jourSemaine(dateMatin)===1 ? -2 : -1); }
+// Semaine « métier » : l'Aprem du samedi/dimanche compte dans la semaine suivante (avec le Matin du lundi)
+function lundiMetier(iso, eq){ const l = lundiIso(iso), j = jourSemaine(iso); return (typeEquipe(eq)==='aprem' && (j===6||j===0)) ? addJours(l,7) : l; }
+
 function confirmerRapportNuit(){
   const input = document.getElementById('date-rapport-nuit');
   const dateAprem = input ? input.value : S.date;
   if(!dateAprem){ toast('Sélectionne une date','err'); return; }
 
   // Calculer J+1 pour le Matin
-  const d = new Date(dateAprem);
-  d.setDate(d.getDate()+1);
-  const dateMatin = d.toISOString().slice(0,10);
+  const dateMatin = matinDe(dateAprem);
 
   // Confirmation
   const ok = confirm(`Générer le rapport de nuit ?\n\n🌆 Aprem du ${fmtDate(dateAprem)}\n☀️ Matin du ${fmtDate(dateMatin)}\n\nCela va charger les données depuis la base.`);
@@ -2596,7 +2603,7 @@ function preparerKPI(raw){
   const best = {};
   infos.forEach(x=>{ const k=x.v.date+'|'+equipeKpi(x.v.equipe); if(!best[k] || x.score>best[k].score) best[k]=x; });
   Object.values(best).sort((a,b)=> a.v.date<b.v.date?-1:(a.v.date>b.v.date?1:0)).forEach(x=>{
-    const v = x.v, eq = equipeKpi(v.equipe), lun = lundiIso(v.date), f = x.f, c = calcFiche(f);
+    const v = x.v, eq = equipeKpi(v.equipe), lun = lundiMetier(v.date, v.equipe), f = x.f, c = calcFiche(f);
     const ag = raw.agents.find(a=>String(a.id)===String(v.agent_id)); const chef = ag?(ag.prenom+' '+ag.nom):'';
     const prev = f ? prevusEff(f, v.equipe, false) : prevusEff(null, v.equipe, false);
     const ecart = f ? ecartTri(f.fin_tri, f.cible_tri) : null;
