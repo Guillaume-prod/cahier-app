@@ -191,6 +191,19 @@ function calcMoyenneColis(){
   return Math.round(moyennes.reduce((a,b)=>a+b,0)/moyennes.length);
 }
 
+// Cadence constatée (colis/h) entre un relevé et le précédent de la même session, arrêts machine déduits : affichée dans les rapports
+const _cadMap = new Map();
+function chargerCadences(colis){
+  const tm = h=>{ const x=h.split(':').map(Number); return x[0]*60+x[1]; };
+  [...new Set((colis||[]).map(c=>c.session_numero||1))].forEach(sn=>{
+    const rows = colis.filter(c=>c.quantite_colis&&c.heure_controle&&(c.session_numero||1)===sn).sort((a,b)=>{ let ma=tm(a.heure_controle), mb=tm(b.heure_controle); if(ma<360&&mb>1080) ma+=1440; if(mb<360&&ma>1080) mb+=1440; return ma-mb; });
+    rows.forEach((c,i)=>{ _cadMap.set(c.id, {v:calcMoyenneLigne(rows,i), arret: i>0?Math.max(0,(c.arret_machine_cumul||0)-(rows[i-1].arret_machine_cumul||0)):0}); });
+  });
+}
+function cadConst(c){
+  const x = _cadMap.get(c.id); if(!x||x.v==null) return '—';
+  return `<b style="color:${x.v>=OBJECTIF_COLIS?'#16a34a':'#dc2626'}">${fmtN(x.v)}</b>${x.arret?`<div style="font-size:9px;font-weight:normal;color:#6b7280">dont ${x.arret} min d'arrêt</div>`:''}`;
+}
 function calcMoyenneLigne(sorted, index){
   // Vitesse entre la ligne précédente et la ligne actuelle
   if(index < 1) return null;
@@ -1245,14 +1258,15 @@ function exporterPDFArchive(index){
 
   <h2 style="color:#1a56a0;font-size:14px;margin:16px 0 8px;border-left:4px solid #1a56a0;padding-left:8px">📦 Contrôle Colis/H — Objectif ${OBJECTIF_COLIS} colis/h</h2>
   <p style="display:inline-block;padding:6px 12px;border-radius:6px;font-weight:bold;background:${moy&&moy>=OBJECTIF_COLIS?'#dcfce7':'#fee2e2'};color:${moy&&moy>=OBJECTIF_COLIS?'#16a34a':'#dc2626'}">Moyenne : ${moy||'—'} colis/h ${moy?(moy>=OBJECTIF_COLIS?'✅ Objectif atteint':'❌ Sous objectif'):''}</p>
-  ${d.colis.filter(c=>c.quantite_colis).length?`<table style="width:100%;border-collapse:collapse;margin-bottom:14px">
-    <tr style="background:#1a56a0;color:white"><th style="padding:6px">Session</th><th style="padding:6px">Quai</th><th style="padding:6px">H contrôle</th><th style="padding:6px">Quantité</th><th style="padding:6px">Cadence</th></tr>
+  ${(chargerCadences(d.colis),'')}${d.colis.filter(c=>c.quantite_colis).length?`<table style="width:100%;border-collapse:collapse;margin-bottom:14px">
+    <tr style="background:#1a56a0;color:white"><th style="padding:6px">Session</th><th style="padding:6px">Quai</th><th style="padding:6px">H contrôle</th><th style="padding:6px">Quantité</th><th style="padding:6px">Cadence</th><th style="padding:6px">Colis/h constaté</th></tr>
     ${d.colis.filter(c=>c.quantite_colis).map(c=>`<tr style="border-bottom:1px solid #eee">
       <td style="padding:6px">S${c.session_numero||1}-L${c.ligne_numero||1}</td>
       <td style="padding:6px">${c.quai||'—'}</td>
       <td style="padding:6px">${c.heure_controle||'—'}</td>
       <td style="padding:6px;font-weight:bold">${c.quantite_colis}</td>
       <td style="padding:6px;color:${c.cadence_ok!==false?'#16a34a':'#dc2626'};font-weight:bold">${c.cadence_ok!==false?'✅ OK':'❌ NOK'}</td>
+      <td style="padding:6px;text-align:center">${cadConst(c)}</td>
     </tr>`).join('')}
   </table>`:'<p>Aucune donnée colis saisie.</p>'}
 
@@ -1618,6 +1632,7 @@ const TYPES_ANOMALIE = [
   { code:'PU',   label:'P.U — Pick-Up',                    couleur:'#d97706', bg:'#fef3c7' },
   { code:'SP',   label:'So Poste — Sous Poste',            couleur:'#7c3aed', bg:'#ede9fe' },
   { code:'MEP',  label:'Mise en Place',                    couleur:'#059669', bg:'#d1fae5' },
+  { code:'FACTEO',label:'Facteo (IMEI)',                  couleur:'#0891b2', bg:'#cffafe' },
   { code:'AUTRE',label:'Autre',                            couleur:'#1a56a0', bg:'#e8f0fb' },
 ];
 
@@ -1642,13 +1657,15 @@ function renderAnomalies(){
           </select>
         </div>
         <div style="margin-bottom:8px">
-          <label class="form-label">${a.type_anomalie==='MEP'?'Brin concerné':'Précision'}</label>
+          <label class="form-label">${a.type_anomalie==='MEP'?'Brin concerné':(a.type_anomalie==='FACTEO'?'IMEI — 4 derniers chiffres (obligatoire)':'Précision')}</label>
           ${a.type_anomalie==='MEP'?`
           <select class="form-input" onchange="modifierAnomalie('${a.id}','brin_mep',this.value)">
             <option value="">— Sélectionner un brin —</option>
             ${BRINS_MEP.map(b=>`<option value="${b}" ${a.brin_mep===b?'selected':''}>${b}</option>`).join('')}
           </select>`:`
-          <input type="text" class="form-input" placeholder="Précision optionnelle..." value="${a.brin_mep||''}" onblur="modifierAnomalie('${a.id}','brin_mep',this.value)" />`}
+          ${a.type_anomalie==='FACTEO'
+            ?`<input type="text" class="form-input" inputmode="numeric" maxlength="4" pattern="[0-9]*" placeholder="Ex : 5110" value="${a.brin_mep||''}" oninput="this.value=this.value.replace(/\D/g,'').slice(0,4)" onblur="modifierAnomalie('${a.id}','brin_mep',this.value)" />`
+            :`<input type="text" class="form-input" placeholder="Précision optionnelle..." value="${a.brin_mep||''}" onblur="modifierAnomalie('${a.id}','brin_mep',this.value)" />`}`}
         </div>
         <div style="margin-bottom:8px">
           <label class="form-label">Description</label>
@@ -1742,6 +1759,7 @@ async function supprimerPhotoAnomalie(id, champ){
   }catch(e){ toast('Erreur suppression photo','err'); }
 }
 const CHAMPS_PHOTO = ['photo_base64','photo2_base64','photo3_base64'];
+function precisionAno(a){ const v=(a.brin_mep||'').trim(); if(!v) return '—'; return a.type_anomalie==='FACTEO' ? 'IMEI …'+v : v; }
 function photosDe(a){ return CHAMPS_PHOTO.filter(c=>a[c]).map(c=>a[c]); }
 function htmlPhotos(a, mw, mh){
   const p = photosDe(a); if(!p.length) return '—';
@@ -1872,7 +1890,7 @@ async function genererRecapSemaine(){
     vacs = vacs.filter(v=> typeEquipe(v.equipe)==='aprem' ? (v.date>=addJours(from,-2) && v.date<=addJours(from,4)) : (v.date>=from && v.date<=to));
     if(!vacs.length){ toast('Aucune vacation cette semaine','err'); return; }
     const ids = vacs.map(v=>v.id).join(',');
-    const [colis, epi, anos, ctrl, agents] = await Promise.all([
+    let [colis, epi, anos, ctrl, agents] = await Promise.all([
       db.get('controles_colis',`vacation_id=in.(${ids})&order=created_at.asc`),
       db.get('epi',`vacation_id=in.(${ids})&order=created_at.asc`),
       db.get('anomalies',`vacation_id=in.(${ids})&order=created_at.asc`),
@@ -1887,6 +1905,8 @@ async function genererRecapSemaine(){
         + anos.filter(a=>a.vacation_id===v.id).length + ctrl.filter(c=>c.vacation_id===v.id).length + ficheTxt(v);
       const best = {}; vacs.forEach(v=>{ const k = v.date+'|'+equipeKpi(v.equipe), n = score(v); if(n>0 && (!best[k] || n>best[k].n)) best[k] = {v,n}; });
       vacs = Object.values(best).map(x=>x.v).sort((a,b)=>a.date<b.date?-1:(a.date>b.date?1:0));
+      const _ids = new Set(vacs.map(v=>String(v.id))); const gardee = x=>_ids.has(String(x.vacation_id));
+      colis = colis.filter(gardee); epi = epi.filter(gardee); anos = anos.filter(gardee); ctrl = ctrl.filter(gardee);
       if(!vacs.length){ toast('Aucune saisie cette semaine','err'); return; } }
     const volJ = vacs.map(v=>{ const r = fiches.find(x=>String(x.vacation_id)===String(v.id)); const f = r?normFiche(r):null; const c = calcFiche(f);
       return {v, f, c, aprem:/^(Aprem|Soir)/i.test(v.equipe||'')}; }).filter(x=>x.f && (x.c.lignes.length || aVal(x.f.presents) || x.c.totConc || x.f.fin_tri));
@@ -1917,13 +1937,6 @@ async function genererRecapSemaine(){
         <td style="padding:10px;background:#f4f6f9;text-align:center"><div style="font-size:20px;font-weight:bold">${epiManq.length}</div>manquement(s) EPI</td>
       </tr></table>
 
-      <h2 style="color:#1a56a0;font-size:14px;margin:16px 0 8px;border-left:4px solid #1a56a0;padding-left:8px">Vacation par vacation</h2>
-      <table style="width:100%;border-collapse:collapse">
-        <tr style="background:#1a56a0;color:white"><th style="${th}">Jour</th><th style="${th}">Équipe</th><th style="${th}">Saisi par</th><th style="${th}">Colis/h</th><th style="${th}">Anomalies</th><th style="${th}">EPI</th></tr>
-        ${parVac.map(x=>`<tr style="border-bottom:1px solid #eee"><td style="padding:6px">${fmtJ(x.v.date)}</td><td style="padding:6px">${escHtml(x.v.equipe||'—')}</td><td style="padding:6px">${escHtml(x.ag)}</td>
-          <td style="padding:6px;font-weight:bold;color:${x.moy!=null&&x.moy>=OBJECTIF_COLIS?'#16a34a':'#dc2626'}">${x.moy!=null?x.moy:'—'}</td>
-          <td style="padding:6px">${x.nbAno||'—'}</td><td style="padding:6px">${x.nbEpi||'—'}</td></tr>`).join('')}
-      </table>
 
       <h2 style="color:#1a56a0;font-size:14px;margin:16px 0 8px;border-left:4px solid #1a56a0;padding-left:8px">📦 Volumes de la semaine</h2>
       ${volJ.length?`<table style="width:100%;border-collapse:collapse;font-size:11px">
@@ -1935,13 +1948,19 @@ async function genererRecapSemaine(){
 
       <h2 style="color:#d97706;font-size:14px;margin:16px 0 8px;border-left:4px solid #d97706;padding-left:8px">⚠️ Anomalies de la semaine (${anos.length})</h2>
       ${anos.length?`
-      <p>${parType.filter(x=>x.n).map(x=>`<span style="display:inline-block;margin-right:12px;font-weight:bold;color:${x.t.couleur}">${escHtml(x.t.label)} : ${x.n}</span>`).join('')}</p>
-      <table style="width:100%;border-collapse:collapse">
-        <tr style="background:#d97706;color:white"><th style="${th}">Jour</th><th style="${th}">Équipe</th><th style="${th}">Type</th><th style="${th}">Précision</th><th style="${th}">Description</th><th style="${th}">Photo</th></tr>
-        ${anos.map(a=>{ const v=vacs.find(z=>z.id===a.vacation_id)||{}; const t=TYPES_ANOMALIE.find(z=>z.code===a.type_anomalie)||TYPES_ANOMALIE[TYPES_ANOMALIE.length-1];
-          return `<tr style="border-bottom:1px solid #eee;vertical-align:top"><td style="padding:6px;white-space:nowrap">${v.date?fmtJ(v.date):'—'}</td><td style="padding:6px">${escHtml(v.equipe||'—')}</td>
-          <td style="padding:6px;font-weight:700;color:${t.couleur}">${escHtml(t.label)}</td><td style="padding:6px">${escHtml(a.brin_mep||'—')}</td><td style="padding:6px">${escHtml(a.description||'—')}</td>
-          <td style="padding:6px">${htmlPhotos(a,100,80)}</td></tr>`; }).join('')}
+      <table style="border-collapse:collapse;margin:6px 0 10px;font-size:12px">
+        <tr style="background:#f4f6f9"><th style="${th}">Type d'anomalie</th><th style="${th};text-align:center">Aprem</th><th style="${th};text-align:center">Matin</th><th style="${th};text-align:center">Total</th></tr>
+        ${TYPES_ANOMALIE.map(t=>{ const l=anos.filter(a=>a.type_anomalie===t.code); const eqOf=a=>{ const v=vacs.find(z=>String(z.id)===String(a.vacation_id)); return typeEquipe(v&&v.equipe); };
+          return `<tr style="border-bottom:1px solid #eee"><td style="padding:5px 8px;font-weight:700;color:${t.couleur}">${escHtml(t.label)}</td><td style="padding:5px 8px;text-align:center">${l.filter(a=>eqOf(a)==='aprem').length}</td><td style="padding:5px 8px;text-align:center">${l.filter(a=>eqOf(a)==='matin').length}</td><td style="padding:5px 8px;text-align:center;font-weight:700">${l.length}</td></tr>`; }).join('')}
+        <tr style="background:#fef3c7;font-weight:700"><td style="padding:5px 8px">Total</td><td style="padding:5px 8px;text-align:center">${anos.filter(a=>{ const v=vacs.find(z=>String(z.id)===String(a.vacation_id)); return typeEquipe(v&&v.equipe)==='aprem'; }).length}</td><td style="padding:5px 8px;text-align:center">${anos.filter(a=>{ const v=vacs.find(z=>String(z.id)===String(a.vacation_id)); return typeEquipe(v&&v.equipe)==='matin'; }).length}</td><td style="padding:5px 8px;text-align:center">${anos.length}</td></tr>
+      </table>
+      <h3 style="color:#d97706;font-size:12px;margin:10px 0 6px">Motifs remontés (regroupés)</h3>
+      <table style="width:100%;border-collapse:collapse;font-size:11px">
+        <tr style="background:#d97706;color:white"><th style="${th}">Type</th><th style="${th};text-align:center">Nb</th><th style="${th}">Précision</th><th style="${th}">Raison</th></tr>
+        ${(()=>{ const g={}; anos.forEach(a=>{ const t=TYPES_ANOMALIE.find(z=>z.code===a.type_anomalie)||TYPES_ANOMALIE[TYPES_ANOMALIE.length-1]; const pr=precisionAno(a); const raison=(a.description||'').trim().replace(/\s+/g,' ');
+              const k=t.code+'|'+pr.toLowerCase()+'|'+raison.toLowerCase(); (g[k]=g[k]||{t,pr,raison,n:0}).n++; });
+            const ordre=Object.values(g).sort((x,y)=>TYPES_ANOMALIE.indexOf(x.t)-TYPES_ANOMALIE.indexOf(y.t)||y.n-x.n);
+            return ordre.map(x=>`<tr style="border-bottom:1px solid #eee;vertical-align:top"><td style="padding:5px 6px;font-weight:700;color:${x.t.couleur};white-space:nowrap">${escHtml(x.t.label)}</td><td style="padding:5px 6px;text-align:center;font-weight:700">${x.n}</td><td style="padding:5px 6px">${escHtml(x.pr)}</td><td style="padding:5px 6px">${escHtml(x.raison?(x.raison.length>160?x.raison.slice(0,157)+'…':x.raison):'—')}</td></tr>`).join(''); })()}
       </table>`:'<p style="color:#16a34a;font-weight:bold">✅ Aucune anomalie signalée cette semaine.</p>'}
 
       <h2 style="color:#1a56a0;font-size:14px;margin:16px 0 8px;border-left:4px solid #1a56a0;padding-left:8px">🦺 EPI</h2>
@@ -1981,6 +2000,7 @@ async function genererRecapSemaine(){
 // ── EXPORT PDF ─────────────────────────────────────────────────
 async function exporterPDF(){
   if(_ficheTimer) await sauverFiche();
+  chargerCadences(S.colisData);
   const moy = calcMoyenneColis();
   const contenu = `
   <div style="font-family:Arial,sans-serif;padding:20px;max-width:800px;margin:0 auto;font-size:12px">
@@ -2005,11 +2025,12 @@ async function exporterPDF(){
   <h2 style="color:#1a56a0;font-size:14px;margin:16px 0 8px;border-left:4px solid #1a56a0;padding-left:8px">📦 Contrôle Colis/H — Objectif ${OBJECTIF_COLIS} colis/h</h2>
   <p style="display:inline-block;padding:6px 12px;border-radius:6px;font-weight:bold;background:${moy&&moy>=OBJECTIF_COLIS?'#dcfce7':'#fee2e2'};color:${moy&&moy>=OBJECTIF_COLIS?'#16a34a':'#dc2626'}">Moyenne : ${moy||'—'} colis/h ${moy?(moy>=OBJECTIF_COLIS?'✅ Objectif atteint':'❌ Sous objectif'):''}</p>
   ${S.colisData.filter(c=>c.quantite_colis).length?`<table style="width:100%;border-collapse:collapse;margin-bottom:14px">
-    <tr style="background:#1a56a0;color:white"><th style="padding:6px">Tranche</th><th style="padding:6px">Camion</th><th style="padding:6px">H contrôle</th><th style="padding:6px">Quantité</th><th style="padding:6px">Cadence</th><th style="padding:6px">Raison NOK</th></tr>
+    <tr style="background:#1a56a0;color:white"><th style="padding:6px">Tranche</th><th style="padding:6px">Camion</th><th style="padding:6px">H contrôle</th><th style="padding:6px">Quantité</th><th style="padding:6px">Cadence</th><th style="padding:6px">Colis/h constaté</th><th style="padding:6px">Raison NOK</th></tr>
     ${S.colisData.filter(c=>c.quantite_colis).map(c=>`<tr style="border-bottom:1px solid #eee">
       <td style="padding:6px">${c.tranche}</td><td style="padding:6px">${c.camion_h_debut||'—'}</td><td style="padding:6px">${c.heure_controle||'—'}</td>
       <td style="padding:6px;font-weight:bold">${c.quantite_colis}</td>
       <td style="padding:6px;color:${c.cadence_ok!==false?'#16a34a':'#dc2626'};font-weight:bold">${c.cadence_ok!==false?'✅ OK':'❌ NOK'}</td>
+      <td style="padding:6px;text-align:center">${cadConst(c)}</td>
       <td style="padding:6px">${c.raison_non_atteinte||'—'}</td>
     </tr>`).join('')}
   </table>`:'<p>Aucune donnée colis saisie.</p>'}
@@ -2028,7 +2049,7 @@ async function exporterPDF(){
       const type=TYPES_ANOMALIE.find(t=>t.code===a.type_anomalie)||TYPES_ANOMALIE[TYPES_ANOMALIE.length-1];
       return `<tr style="border-bottom:1px solid #eee;vertical-align:top">
         <td style="padding:6px;font-weight:700;color:${type.couleur};white-space:nowrap">${type.label}</td>
-        <td style="padding:6px">${a.brin_mep||'—'}</td>
+        <td style="padding:6px">${escHtml(precisionAno(a))}</td>
         <td style="padding:6px">${a.description||'—'}</td>
         <td style="padding:6px">${htmlPhotos(a,110,90)}</td>
       </tr>`;
@@ -2142,6 +2163,7 @@ async function exporterRapportNuit(dateAprem, dateMatin){
         <p style="color:#9ca3af;margin-top:12px">Aucune donnée saisie pour cette vacation.</p>
       </div>`;
 
+      chargerCadences(d.colis);
       function toMinN(h){ const [hh,mm]=h.split(':').map(Number); return hh*60+mm; }
       // Calcul moyenne colis
       const sessions = [...new Set(d.colis.map(c=>c.session_numero||1))];
@@ -2182,7 +2204,7 @@ async function exporterRapportNuit(dateAprem, dateMatin){
           <tr style="background:#1a56a0;color:white">
             <th style="padding:5px 6px">Session</th><th style="padding:5px 6px">Ligne</th>
             <th style="padding:5px 6px">Camion</th><th style="padding:5px 6px">H relevé</th>
-            <th style="padding:5px 6px">Quantité</th><th style="padding:5px 6px">Cadence</th>
+            <th style="padding:5px 6px">Quantité</th><th style="padding:5px 6px">Cadence</th><th style="padding:5px 6px">Colis/h constaté</th>
             <th style="padding:5px 6px">Raison NOK</th>
           </tr>
           ${d.colis.filter(c=>c.quantite_colis).map(c=>`
@@ -2193,6 +2215,7 @@ async function exporterRapportNuit(dateAprem, dateMatin){
             <td style="padding:5px 6px">${c.heure_controle||'—'}</td>
             <td style="padding:5px 6px;font-weight:bold;text-align:center">${c.quantite_colis}</td>
             <td style="padding:5px 6px;text-align:center;color:${c.cadence_ok!==false?'#16a34a':'#dc2626'};font-weight:bold">${c.cadence_ok!==false?'✅ OK':'❌ NOK'}</td>
+            <td style="padding:5px 6px;text-align:center">${cadConst(c)}</td>
             <td style="padding:5px 6px;color:#dc2626">${c.cadence_ok===false&&c.raison_non_atteinte?c.raison_non_atteinte:'—'}</td>
           </tr>`).join('')}
         </table>`:'<p style="color:#9ca3af">Aucune donnée colis saisie.</p>'}
@@ -2233,7 +2256,7 @@ async function exporterRapportNuit(dateAprem, dateMatin){
             const type=TYPES_ANOMALIE.find(t=>t.code===a.type_anomalie)||TYPES_ANOMALIE[TYPES_ANOMALIE.length-1];
             return `<tr style="border-bottom:1px solid #eee;vertical-align:top">
               <td style="padding:5px 6px;font-weight:700;color:${type.couleur};white-space:nowrap">${type.label}</td>
-              <td style="padding:5px 6px">${a.brin_mep||'—'}</td>
+              <td style="padding:5px 6px">${escHtml(precisionAno(a))}</td>
               <td style="padding:5px 6px">${a.description||'—'}</td>
               <td style="padding:5px 6px">${htmlPhotos(a,95,75)}</td>
             </tr>`;
@@ -2626,20 +2649,20 @@ function preparerKPI(raw){
       x.anos.length, x.epis.filter(e=>e.nom_prenom&&e.nom_prenom!=='RAS').length, trnRes.length, trnRes.filter(t=>t.resultat!=='OK').length]);
     const hasPres = f && aVal(f.presents);
     const anoN = code => x.anos.filter(a=>(a.type_anomalie||'AUTRE')===code).length;
-    const tNom = x.anos.filter(a=>!['ERA','PU','SP','MEP'].includes(a.type_anomalie||'AUTRE')).length;
+    const tNom = x.anos.filter(a=>!['ERA','PU','SP','MEP','FACTEO'].includes(a.type_anomalie||'AUTRE')).length;
     P.kpi.push({cle:v.date+'|'+eq, date:v.date, lundi:lun, equipe:eq,
       prevus: hasPres&&prev!=null?prev:null, presents: hasPres?nI(f.presents):null, interimaires: f&&aVal(f.interim)?nI(f.interim):null,
       cible_tri: f&&f.cible_tri?f.cible_tri:null, fin_tri: f&&f.fin_tri?f.fin_tri:null, ecart_fin: ecart==null?null:ecart,
       dispersion: f&&c.lignes.length?c.sumDisp:null, distribution: f&&c.lignes.length?c.sumDist:null, hn: f&&aVal(f.hn)?c.hn:null,
       total_colis: f&&(c.lignes.length||aVal(f.hn))?c.totalHN:null, colis_charges:null,
       cadence: rel.length?(calcMoyenneColisArchive(x.colis)||null):null, releves: rel.length, sous_objectif: rel.filter(c2=>c2.cadence_ok===false).length,
-      arret_min: Object.values(sess).reduce((a,b)=>a+b,0), anomalies:x.anos.length, ano_era:anoN('ERA'), ano_pu:anoN('PU'), ano_sp:anoN('SP'), ano_mep:anoN('MEP'), ano_autre:tNom,
+      arret_min: Object.values(sess).reduce((a,b)=>a+b,0), anomalies:x.anos.length, ano_era:anoN('ERA'), ano_pu:anoN('PU'), ano_sp:anoN('SP'), ano_mep:anoN('MEP'), ano_facteo:anoN('FACTEO'), ano_autre:tNom,
       epi: x.epis.filter(e=>e.nom_prenom&&e.nom_prenom!=='RAS').length, tournees:trnRes.length, tournees_nok:trnRes.filter(t=>t.resultat!=='OK').length});
     if(f && /^aprem$/i.test(eq) && (aVal(f.conc.presents) || c.liaisons.length)){
       P.kpi.push({cle:v.date+'|Concentration', date:v.date, lundi:lun, equipe:'Concentration',
         prevus: aVal(f.conc.presents)?(aVal(f.conc.prevus)?nI(f.conc.prevus):PREVUS_DEFAUT.conc):null, presents: aVal(f.conc.presents)?nI(f.conc.presents):null, interimaires: aVal(f.conc.interim)?nI(f.conc.interim):null,
         cible_tri:null, fin_tri:null, ecart_fin:null, dispersion:null, distribution:null, hn:null, total_colis:null, colis_charges:c.totConc, cadence:null, releves:0, sous_objectif:0, arret_min:0,
-        anomalies:0, ano_era:0, ano_pu:0, ano_sp:0, ano_mep:0, ano_autre:0, epi:0, tournees:0, tournees_nok:0});
+        anomalies:0, ano_era:0, ano_pu:0, ano_sp:0, ano_mep:0, ano_facteo:0, ano_autre:0, epi:0, tournees:0, tournees_nok:0});
       P.vac.push([{d:v.date},{d:lun},'Concentration',chef, !aVal(f.conc.presents)?'':(aVal(f.conc.prevus)?nI(f.conc.prevus):PREVUS_DEFAUT.conc), aVal(f.conc.presents)?nI(f.conc.presents):'', aVal(f.conc.interim)?nI(f.conc.interim):'',
         '','','','','','','', c.totConc, '','','','','','','','']);
     }
@@ -2860,6 +2883,7 @@ const INDIC = [
   {id:'ano_pu',g:'⚠️ Anomalies',l:'P.U',u:'',pol:-1,f:r=>_sum(r,'ano_pu')},
   {id:'ano_sp',g:'⚠️ Anomalies',l:'So Poste',u:'',pol:-1,f:r=>_sum(r,'ano_sp')},
   {id:'ano_mep',g:'⚠️ Anomalies',l:'Mise en place',u:'',pol:-1,f:r=>_sum(r,'ano_mep')},
+  {id:'ano_facteo',g:'⚠️ Anomalies',l:'Facteo',u:'',pol:-1,f:r=>_sum(r,'ano_facteo')},
   {id:'ano_autre',g:'⚠️ Anomalies',l:'Autres',u:'',pol:-1,f:r=>_sum(r,'ano_autre')},
   {id:'epi',g:'⚠️ Anomalies',l:'Manquements EPI',u:'',pol:-1,f:r=>_sum(r,'epi')},
 ];
