@@ -1411,15 +1411,15 @@ async function chargerAgentsPersonnel(){
 }
 
 // ── FENÊTRES DE SAISIE ─────────────────────────────────────────
-// Aprem : de 16h00 à 01h00 ; Matin : de 00h00 à 08h00 ; autres équipes et responsable : toujours ouvert
+// Aprem : de 16h00 à 01h00 ; Matin : de 00h00 à 09h00 ; autres équipes et responsable : toujours ouvert
 function minutesNow(){ const n=new Date(); return n.getHours()*60+n.getMinutes(); }
 function fenetreSaisieOuverte(equipe){
   const t = minutesNow();
   if(equipe==='Aprem') return t>=960 || t<60;
-  if(equipe==='Matin') return t<480;
+  if(equipe==='Matin') return t<540;
   return true;
 }
-function libelleFenetre(equipe){ return equipe==='Aprem' ? '16h00 à 01h00' : equipe==='Matin' ? '00h00 à 08h00' : ''; }
+function libelleFenetre(equipe){ return equipe==='Aprem' ? '16h00 à 01h00' : equipe==='Matin' ? '00h00 à 09h00' : ''; }
 function renderFermee(){
   const eq = S.agent.equipe;
   return `<div class="card" style="text-align:center">
@@ -2022,8 +2022,8 @@ async function exporterPDF(){
     <div style="position:sticky;top:0;background:#1a56a0;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;z-index:10">
       <span style="color:white;font-weight:700;font-size:15px">📄 Aperçu PDF</span>
       <div style="display:flex;gap:8px">
-        <button onclick="partagerPDF()" style="padding:8px 16px;background:#16a34a;color:white;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">📤 Partager</button>
-        <button onclick="window.print()" style="padding:8px 16px;background:white;color:#1a56a0;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">🖨️ Imprimer</button>
+        ${boutonEnvoi()}
+        ${estAprem()?'':`<button onclick="window.print()" style="padding:8px 16px;background:white;color:#1a56a0;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">🖨️ Imprimer</button>`}
         <button onclick="fermerPDF()" style="padding:8px 14px;background:rgba(255,255,255,0.2);color:white;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">✕ Fermer</button>
       </div>
     </div>
@@ -2037,6 +2037,14 @@ async function exporterPDF(){
   style.textContent = `@media print { body > *:not(#pdf-overlay) { display:none !important; } #pdf-overlay > div:first-child { display:none !important; } #pdf-overlay { position:static !important; } }`;
   document.head.appendChild(style);
 }
+
+// L'équipe Aprem n'envoie pas de rapport : celui du Matin (rapport de nuit) contient déjà l'Aprem
+function estAprem(){ return !S.agent.est_responsable && /^(Aprem|Soir)/i.test(S.agent.equipe||''); }
+function boutonEnvoi(){
+  if(estAprem()) return `<button onclick="validerSansEnvoi()" style="padding:8px 16px;background:#0f766e;color:white;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">✅ Valider</button>`;
+  return `<button onclick="partagerPDF()" style="padding:8px 16px;background:#16a34a;color:white;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">📤 Partager</button>`;
+}
+function validerSansEnvoi(){ fermerPDF(); toast("✅ Rapport vérifié — le chef du Matin enverra le rapport de nuit (il contient l'Aprem)",'ok'); }
 
 function fermerPDF(){
   window._nomPdfPartage = null; window._texteResume = null;
@@ -2227,8 +2235,8 @@ async function exporterRapportNuit(dateAprem, dateMatin){
       <div style="position:sticky;top:0;background:#6366f1;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;z-index:10">
         <span style="color:white;font-weight:700;font-size:15px">🌙 Rapport de nuit</span>
         <div style="display:flex;gap:8px">
-          <button onclick="partagerPDF()" style="padding:8px 16px;background:#16a34a;color:white;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">📤 Partager</button>
-        <button onclick="window.print()" style="padding:8px 16px;background:white;color:#6366f1;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">🖨️ Imprimer</button>
+          ${boutonEnvoi()}
+        ${estAprem()?'':`<button onclick="window.print()" style="padding:8px 16px;background:white;color:#6366f1;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">🖨️ Imprimer</button>`}
           <button onclick="fermerPDF()" style="padding:8px 14px;background:rgba(255,255,255,0.2);color:white;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">✕ Fermer</button>
         </div>
       </div>
@@ -2964,7 +2972,7 @@ function envoyerNotif(titre, corps){
 }
 
 // ── CLÔTURE AUTOMATIQUE ─────────────────────────────────────────
-// Aprem → clôture à 01h00 / Matin → clôture à 08h00
+// Aprem → clôture à 01h00 / Matin → clôture à 09h00
 let clotureAutoInterval = null;
 
 function demarrerClotureAuto(){
@@ -2992,11 +3000,11 @@ async function verifierClotureAuto(){
 
   // Seuils de clôture automatique
   // Aprem : clôture auto à 01h00 (si pas encore clôturée manuellement)
-  // Matin : clôture auto à 08h00 (si pas encore clôturée manuellement)
+  // Matin : clôture auto à 09h00 (si pas encore clôturée manuellement)
   let doitClore = false;
   // Fenêtres de clôture : sinon la vacation se fermait dès l'ouverture de l'application pendant la vacation (ex. Aprem à 17h)
   if(equipe === 'Aprem' && !fenetreSaisieOuverte('Aprem')) doitClore = true; // de 01h00 à 16h00
-  if(equipe === 'Matin' && !fenetreSaisieOuverte('Matin')) doitClore = true; // à partir de 08h00
+  if(equipe === 'Matin' && !fenetreSaisieOuverte('Matin')) doitClore = true; // à partir de 09h00
 
   if(!doitClore) return;
 
