@@ -1848,16 +1848,23 @@ async function partagerPDF(nom){
       pagebreak:{mode:['css','legacy']}
     }).from(el).outputPdf('blob');
     const file = new File([blob], nom, {type:'application/pdf'});
+    const telecharger = ()=>{ const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = nom;
+      document.body.appendChild(a); a.click(); a.remove(); };
     if(navigator.canShare && navigator.canShare({files:[file]})){
-      await navigator.share({files:[file], title:nom.replace('.pdf',''), text: window._texteResume || ('La Poste Mulhouse — '+nom.replace('.pdf','').replace(/_/g,' '))});
+      try{
+        await navigator.share({files:[file], title:nom.replace('.pdf',''), text: window._texteResume || ('La Poste Mulhouse — '+nom.replace('.pdf','').replace(/_/g,' '))});
+      }catch(e2){
+        if(e2 && e2.name==='AbortError') return;
+        // Le téléphone a refusé le partage (délai écoulé après la création du PDF) : on télécharge le PDF à la place
+        console.warn('share', e2); telecharger(); toast('PDF téléchargé (partage refusé : ouvrez-le depuis vos téléchargements)','ok');
+      }
     } else {
-      const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = nom;
-      document.body.appendChild(a); a.click(); a.remove();
+      telecharger();
       toast('PDF téléchargé','ok');
     }
   }catch(e){
     if(e && e.name==='AbortError') return;
-    toast('Erreur lors de la création du PDF','err'); console.error(e);
+    toast('Erreur lors de la création du PDF : '+((e&&(e.message||e.name))||'inconnue'),'err'); console.error(e);
   }
 }
 async function copierResume(){
