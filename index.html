@@ -1655,13 +1655,14 @@ function renderAnomalies(){
           <textarea class="form-input" rows="3" placeholder="Décrivez l'anomalie..." onblur="modifierAnomalie('${a.id}','description',this.value)" style="resize:vertical">${a.description||''}</textarea>
         </div>
         <div>
-          <label class="form-label">Photo</label>
-          ${a.photo_base64
-            ?`<div style="position:relative;display:inline-block">
-                <img src="${a.photo_base64}" style="max-width:100%;max-height:200px;border-radius:8px;border:2px solid ${type.couleur}" />
-                <button onclick="supprimerPhotoAnomalie('${a.id}')" style="position:absolute;top:4px;right:4px;background:#dc2626;color:white;border:none;border-radius:6px;padding:3px 8px;font-size:11px;font-weight:700;cursor:pointer">✕</button>
-              </div>`
-            :`<div style="display:flex;gap:8px;flex-wrap:wrap">
+          <label class="form-label">Photos (${photosDe(a).length}/3)</label>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+          ${CHAMPS_PHOTO.filter(ch=>a[ch]).map(ch=>`<div style="position:relative;display:inline-block">
+                <img src="${a[ch]}" style="max-width:100%;max-height:140px;border-radius:8px;border:2px solid ${type.couleur}" />
+                <button onclick="supprimerPhotoAnomalie('${a.id}','${ch}')" style="position:absolute;top:4px;right:4px;background:#dc2626;color:white;border:none;border-radius:6px;padding:3px 8px;font-size:11px;font-weight:700;cursor:pointer">✕</button>
+              </div>`).join('')}
+          </div>
+          ${photosDe(a).length<3?`<div style="display:flex;gap:8px;flex-wrap:wrap">
                 <label style="flex:1;min-width:120px;padding:10px;background:white;border:2px dashed var(--gris-bord);border-radius:10px;text-align:center;cursor:pointer;font-size:12px;color:var(--texte-doux)">
                   📷 Prendre une photo
                   <input type="file" accept="image/*" capture="environment" style="display:none" onchange="ajouterPhotoAnomalie('${a.id}',this)" />
@@ -1670,8 +1671,7 @@ function renderAnomalies(){
                   🖼 Charger une photo
                   <input type="file" accept="image/*" style="display:none" onchange="ajouterPhotoAnomalie('${a.id}',this)" />
                 </label>
-              </div>`
-          }
+              </div>`:`<div style="font-size:11px;color:var(--texte-doux)">3 photos maximum atteintes.</div>`}
         </div>
       </div>`;
     }).join('')}
@@ -1714,28 +1714,38 @@ function ajouterPhotoAnomalie(id, input){
     const img = new Image();
     img.onload = function(){
       const canvas = document.createElement('canvas');
-      const MAX = 1200;
+      const MAX = 1000;
       let w = img.width, h = img.height;
       if(w > MAX){ h = Math.round(h*MAX/w); w = MAX; }
       if(h > MAX){ w = Math.round(w*MAX/h); h = MAX; }
       canvas.width = w; canvas.height = h;
       canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-      const base64 = canvas.toDataURL('image/jpeg', 0.82);
-      modifierAnomalie(id, 'photo_base64', base64);
+      const base64 = canvas.toDataURL('image/jpeg', 0.78);
       const a = S.anomalies.find(x=>x.id===id);
-      if(a){ a.photo_base64 = base64; render(); }
+      if(!a) return;
+      const champ = CHAMPS_PHOTO.find(ch=>!a[ch]);
+      if(!champ){ toast('3 photos maximum','err'); return; }
+      a[champ] = base64; render();
+      modifierAnomalie(id, champ, base64);
     };
     img.src = e.target.result;
   };
   reader.readAsDataURL(file);
 }
 
-async function supprimerPhotoAnomalie(id){
+async function supprimerPhotoAnomalie(id, champ){
+  champ = champ || 'photo_base64';
   try{
-    await db.patch('anomalies',`id=eq.${id}`,{photo_base64:null});
+    await db.patch('anomalies',`id=eq.${id}`,{[champ]:null});
     const a = S.anomalies.find(x=>x.id===id);
-    if(a){ a.photo_base64=null; render(); }
+    if(a){ a[champ]=null; render(); }
   }catch(e){ toast('Erreur suppression photo','err'); }
+}
+const CHAMPS_PHOTO = ['photo_base64','photo2_base64','photo3_base64'];
+function photosDe(a){ return CHAMPS_PHOTO.filter(c=>a[c]).map(c=>a[c]); }
+function htmlPhotos(a, mw, mh){
+  const p = photosDe(a); if(!p.length) return '—';
+  return `<div style="display:flex;gap:4px;flex-wrap:wrap;max-width:${mw*2+8}px">`+p.map(src=>`<img src="${src}" style="max-width:${mw}px;max-height:${mh}px;border-radius:4px" />`).join('')+'</div>';
 }
 
 function renderPDF(){
@@ -1931,7 +1941,7 @@ async function genererRecapSemaine(){
         ${anos.map(a=>{ const v=vacs.find(z=>z.id===a.vacation_id)||{}; const t=TYPES_ANOMALIE.find(z=>z.code===a.type_anomalie)||TYPES_ANOMALIE[TYPES_ANOMALIE.length-1];
           return `<tr style="border-bottom:1px solid #eee;vertical-align:top"><td style="padding:6px;white-space:nowrap">${v.date?fmtJ(v.date):'—'}</td><td style="padding:6px">${escHtml(v.equipe||'—')}</td>
           <td style="padding:6px;font-weight:700;color:${t.couleur}">${escHtml(t.label)}</td><td style="padding:6px">${escHtml(a.brin_mep||'—')}</td><td style="padding:6px">${escHtml(a.description||'—')}</td>
-          <td style="padding:6px">${a.photo_base64?`<img src="${a.photo_base64}" style="max-width:110px;max-height:90px;border-radius:4px" />`:'—'}</td></tr>`; }).join('')}
+          <td style="padding:6px">${htmlPhotos(a,100,80)}</td></tr>`; }).join('')}
       </table>`:'<p style="color:#16a34a;font-weight:bold">✅ Aucune anomalie signalée cette semaine.</p>'}
 
       <h2 style="color:#1a56a0;font-size:14px;margin:16px 0 8px;border-left:4px solid #1a56a0;padding-left:8px">🦺 EPI</h2>
@@ -2020,7 +2030,7 @@ async function exporterPDF(){
         <td style="padding:6px;font-weight:700;color:${type.couleur};white-space:nowrap">${type.label}</td>
         <td style="padding:6px">${a.brin_mep||'—'}</td>
         <td style="padding:6px">${a.description||'—'}</td>
-        <td style="padding:6px">${a.photo_base64?`<img src="${a.photo_base64}" style="max-width:120px;max-height:100px;border-radius:4px" />`:'—'}</td>
+        <td style="padding:6px">${htmlPhotos(a,110,90)}</td>
       </tr>`;
     }).join('')}
   </table>`:'<p style="color:#16a34a;font-weight:bold">✅ Aucune anomalie signalée.</p>'}
@@ -2225,7 +2235,7 @@ async function exporterRapportNuit(dateAprem, dateMatin){
               <td style="padding:5px 6px;font-weight:700;color:${type.couleur};white-space:nowrap">${type.label}</td>
               <td style="padding:5px 6px">${a.brin_mep||'—'}</td>
               <td style="padding:5px 6px">${a.description||'—'}</td>
-              <td style="padding:5px 6px">${a.photo_base64?`<img src="${a.photo_base64}" style="max-width:100px;max-height:80px;border-radius:4px" />`:'—'}</td>
+              <td style="padding:5px 6px">${htmlPhotos(a,95,75)}</td>
             </tr>`;
           }).join('')}
         </table>`:'<p style="color:#16a34a;font-weight:bold">✅ Aucune anomalie signalée.</p>'}
