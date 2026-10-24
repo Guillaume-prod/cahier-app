@@ -1328,6 +1328,7 @@ async function connexion(){
     const agentData = agentRes[0];
     S.agent = agentData;
     S.authSession = data.session;
+    try{ localStorage.setItem('cahier_login_ts', String(Date.now())); }catch(e){}
     S.loading = true; render();
     await chargerTout();
     S.loading = false;
@@ -1365,7 +1366,23 @@ async function changerCode(){
   }catch(e){ toast('Erreur','err'); }
 }
 
+// ── Déconnexion automatique : Matin à 09h00, Aprem à 01h00 (chefs d'équipe uniquement) ──
+function heureCoupure(ag){ if(!ag||ag.est_responsable) return null; const t=typeEquipe(ag.equipe); return t==='matin'?9:(t==='aprem'?1:null); }
+function prochaineCoupure(tsMs, h){ const d=new Date(tsMs); d.setHours(h,0,0,0); if(d.getTime()<=tsMs) d.setDate(d.getDate()+1); return d.getTime(); }
+async function verifierDeconnexionAuto(){
+  if(!S.agent) return; const h = heureCoupure(S.agent); if(h==null) return;
+  let ts = 0; try{ ts = parseInt(localStorage.getItem('cahier_login_ts')||'0',10); }catch(e){}
+  if(!ts){ try{ localStorage.setItem('cahier_login_ts', String(Date.now())); }catch(e){} return; }
+  if(Date.now() >= prochaineCoupure(ts, h)){
+    try{ if(_ficheTimer) await sauverFiche(); }catch(e){}
+    await deconnexion(); try{ toast('Session terminée automatiquement — reconnectez-vous','ok'); }catch(e){}
+  }
+}
+setInterval(verifierDeconnexionAuto, 30000);
+document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible') verifierDeconnexionAuto(); });
+
 async function deconnexion(){
+  try{ localStorage.removeItem('cahier_login_ts'); }catch(e){}
   await desinscrirePush();
   arreterRappelColis();
   await supabaseAuth.auth.signOut();
@@ -3033,6 +3050,27 @@ function renderKPI(){
 }
 
 render();
+
+// ── RESTER CONNECTÉ : on reprend la session enregistrée sur l'appareil (renouvelée automatiquement) ──
+async function restaurerSession(){
+  try{
+    const { data } = await supabaseAuth.auth.getSession(); const ses = data && data.session;
+    if(!ses || !ses.user || !ses.user.email || S.agent) return;
+    const r = await db.get('agents',`email=eq.${encodeURIComponent(ses.user.email)}&select=*`);
+    if(!r.length || S.agent) return;
+    S.agent = r[0]; S.authSession = ses;
+    { const h0 = heureCoupure(S.agent); let ts0 = 0; try{ ts0 = parseInt(localStorage.getItem('cahier_login_ts')||'0',10); }catch(e){}
+      if(h0!=null && ts0 && Date.now() >= prochaineCoupure(ts0, h0)){ S.agent = null; await supabaseAuth.auth.signOut(); try{ localStorage.removeItem('cahier_login_ts'); }catch(e){} render(); return; } }
+    S.loading = true; render();
+    await chargerTout();
+    S.loading = false;
+    if(doitAfficherBienvenue()) S.vue = 'bienvenue';
+    render();
+    try{ await inscrirePush(); }catch(e){}
+    demarrerRappelColis(); demarrerClotureAuto();
+  }catch(e){ console.warn('restaurerSession', e); S.loading = false; render(); }
+}
+restaurerSession();
 
 // ── SERVICE WORKER ────────────────────────────────────────────
 if('serviceWorker' in navigator){
