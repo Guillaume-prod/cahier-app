@@ -1439,7 +1439,30 @@ async function deconnexion(){
 }
 
 async function finVacation(){
-  if(!confirm('Terminer cette vacation ?')) return;
+  // Pour l'Aprem : vérifier si les consignes de passation sont remplies
+  const equipe = S.agent && S.agent.equipe;
+  if(equipe === 'Aprem'){
+    const fiche = S.fiche;
+    const passationVide = !fiche || (!fiche.passation && !fiche.commentaire);
+    if(passationVide){
+      const aller = confirm('⚠️ Tu n\'as pas renseigné les consignes pour l\'équipe du Matin.\n\nVeux-tu quand même terminer sans laisser de consignes ?');
+      if(!aller){
+        // Rediriger vers la fiche section consignes
+        S.vue = 'fiche';
+        render();
+        setTimeout(()=>{
+          const el = document.querySelector('[data-section="passation"]');
+          if(el) el.scrollIntoView({behavior:'smooth'});
+        }, 200);
+        toast('📝 Remplis les consignes de passation avant de clôturer','ok');
+        return;
+      }
+    } else {
+      if(!confirm('Terminer cette vacation ?')) return;
+    }
+  } else {
+    if(!confirm('Terminer cette vacation ?')) return;
+  }
   arreterRappelColis();
   if(clotureAutoInterval){ clearInterval(clotureAutoInterval); clotureAutoInterval=null; }
   // Mettre à jour les KPI puis marquer la vacation comme terminée en base
@@ -1452,6 +1475,7 @@ async function finVacation(){
   S.epiData = [];
   S.anomalies = [];
   S.tournees = [];
+  S.fiche = null;
   S.vue = 'epi';
   toast('✅ Vacation terminée !','ok');
   render();
@@ -2623,7 +2647,7 @@ function renderFiche(){
     <div style="${box};background:#e8f0fb"><div style="${tot};font-size:15px"><span>Total colis chargés (Concentration)</span><strong id="f-totConc" style="color:var(--bleu)">${fmtN(c.totConc)}</strong></div></div>
     `:''}
 
-    <div style="font-weight:700;margin:18px 0 6px">💬 Commentaire et passation</div>
+    <div data-section="passation" style="font-weight:700;margin:18px 0 6px">💬 Commentaire et passation</div>
     <label style="${lbl}">Événements marquants de la vacation</label>
     <textarea class="form-input" rows="3" placeholder="Pannes, retards camions, échanges avec La Poste…" oninput="fSet('commentaire',this.value)" style="resize:vertical;margin-bottom:8px">${escHtml(f.commentaire||'')}</textarea>
     <label style="${lbl}">Consignes pour l'équipe suivante</label>
