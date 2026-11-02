@@ -1860,7 +1860,6 @@ function ouvrirOverlayClient(titre, contenu, nom, texte, mail, debug){
       <div style="display:flex;gap:8px">
         <button onclick="partagerPDF()" style="padding:8px 16px;background:#16a34a;color:white;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">📤 Partager</button>
         <button onclick="telechargerPDFClient()" style="padding:8px 12px;background:white;color:#1a56a0;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">📥 PDF</button>
-        <button onclick="ouvrirMailClient()" style="padding:8px 12px;background:#fef3c7;color:#92400e;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">✉️ Outlook</button>
         <button onclick="fermerPDF()" style="padding:8px 14px;background:rgba(255,255,255,0.2);color:white;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">✕ Fermer</button>
       </div></div>${debug&&S.agent&&S.agent.est_responsable?`<div style="background:#fef9c3;color:#713f12;font:11px monospace;padding:8px;word-break:break-all">🔧 Diagnostic (responsable) : ${escHtml(debug)}</div>`:''}<div id="pdf-content">${contenu}</div>`;
   document.body.appendChild(overlay);
