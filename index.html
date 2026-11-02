@@ -1392,7 +1392,7 @@ async function deconnexion(){
 }
 
 async function finVacation(){
-  if(!confirm('Terminer cette vacation ?')) return;
+  if(!confirm('Terminer cette vacation ?'+((S.agent&&!S.agent.est_responsable&&(S.agent.equipe==='Aprem'||S.agent.equipe==='Matin'))?'\n\nAprès « Fin », vous ne pourrez plus vous reconnecter avant le prochain créneau.':''))) return;
   arreterRappelColis();
   if(clotureAutoInterval){ clearInterval(clotureAutoInterval); clotureAutoInterval=null; }
   // Mettre à jour les KPI puis marquer la vacation comme terminée en base
@@ -1407,6 +1407,7 @@ async function finVacation(){
   S.tournees = [];
   S.vue = 'epi';
   toast('✅ Vacation terminée !','ok');
+  { const eq = S.agent.equipe; if(!S.agent.est_responsable && (eq==='Aprem'||eq==='Matin')){ S.horsFenetre = true; S.vacTerminee = true; S.lockUntil = prochainCreneau(eq); } }
   render();
 }
 
@@ -1455,8 +1456,17 @@ function fenetreSaisieOuverte(equipe){
   return true;
 }
 function libelleFenetre(equipe){ return equipe==='Aprem' ? '16h00 à 01h00' : equipe==='Matin' ? '00h00 à 09h00' : ''; }
+// Après « Fin » : plus d'accès jusqu'au prochain créneau (Matin : 00h00 ; Aprem : 16h00) — chefs d'équipe uniquement
+function debutCreneau(equipe){ const n=new Date(), ws=new Date(n); if(equipe==='Matin'){ ws.setHours(0,0,0,0); } else { if(n.getHours()<1) ws.setDate(ws.getDate()-1); ws.setHours(16,0,0,0); } return ws.getTime(); }
+function prochainCreneau(equipe){ const n=new Date(), d=new Date(n); if(equipe==='Matin'){ d.setDate(d.getDate()+1); d.setHours(0,0,0,0); } else { d.setHours(16,0,0,0); if(d.getTime()<=n.getTime()) d.setDate(d.getDate()+1); } return d.getTime(); }
 function renderFermee(){
   const eq = S.agent.equipe;
+  if(S.vacTerminee) return `<div class="card" style="text-align:center">
+    <div style="font-size:42px;margin-bottom:8px">✅</div>
+    <div class="card-title" style="justify-content:center">Vacation terminée</div>
+    <div class="info-banner">Merci ! La saisie est fermée jusqu'au prochain créneau de l'équipe ${eq} (<strong>${libelleFenetre(eq)}</strong>).</div>
+    <button class="btn-primary" style="background:var(--rouge)" onclick="deconnexion()">Se déconnecter</button>
+  </div>`;
   return `<div class="card" style="text-align:center">
     <div style="font-size:42px;margin-bottom:8px">🔒</div>
     <div class="card-title" style="justify-content:center">Saisie fermée</div>
@@ -1476,13 +1486,18 @@ async function getOrCreateVacation(){
   const hier = new Date(Date.now() - 36*60*60*1000);
   const hierStr = `${hier.getFullYear()}-${String(hier.getMonth()+1).padStart(2,'0')}-${String(hier.getDate()).padStart(2,'0')}`;
   let vacs = await db.get('vacations_suivi',`agent_id=eq.${S.agent.id}&date=gte.${hierStr}&order=created_at.desc&select=*`);
-  S.horsFenetre = false;
+  S.horsFenetre = false; S.vacTerminee = false;
   // Hors du créneau de saisie : on ferme une vacation oubliée et on n'en crée pas de nouvelle
   if(!S.agent.est_responsable && !fenetreSaisieOuverte(equipe)){
     const oubliee = vacs.find(v=>!v.terminee);
     if(oubliee){ try{ await db.patch('vacations_suivi',`id=eq.${oubliee.id}`,{terminee:true}); }catch(e){} }
     S.vacationId = null; S.horsFenetre = true;
     return;
+  }
+  // Vacation déjà terminée (bouton « Fin ») dans ce créneau : accès fermé jusqu'au prochain créneau
+  if(!S.agent.est_responsable && (equipe==='Aprem'||equipe==='Matin')){
+    const ws = debutCreneau(equipe); const ts = v=>new Date(v.created_at.endsWith('Z')?v.created_at:v.created_at+'Z').getTime();
+    if(vacs.some(v=>v.terminee && v.created_at && ts(v)>=ws)){ S.vacationId = null; S.horsFenetre = true; S.vacTerminee = true; S.lockUntil = prochainCreneau(equipe); return; }
   }
   // Prendre la vacation active la plus récente (non terminée) ; une vacation ouverte depuis plus de 14 h est périmée
   let vacActive = vacs.find(v=>!v.terminee);
@@ -1892,7 +1907,7 @@ async function genererCRClientNuit(){
       :'<p style="color:#16a34a;font-weight:bold">✅ Aucune anomalie signalée.</p>'}
     </div>`;
     const texte = `Compte rendu de la nuit (Aprem ${fmtJ(dAprem)} — Matin ${fmtJ(dMatin)}) — La Poste Mulhouse\nColis : ${fmtN(T.sans.total)} (hors Concentration), ${fmtN(T.avec)} avec Concentration\nEffectifs présents : Aprem ${pres(fa,false)}, Matin ${pres(fm,false)}, Concentration ${pres(fa,true)}\nAnomalies : ${anos.length}\nDétail dans le PDF joint.`;
-    ouvrirOverlayClient('🤝 CR client — nuit', contenu, `CR_client_nuit_${dMatin}.pdf`, texte, {sujet:`CR de la vacation du ${dmy(dAprem)} au ${dmy(dMatin)} — La Poste Mulhouse`, corps:`Bonjour,\n\nVeuillez trouver en P.J, le CR de la vacation du ${dmy(dAprem)} au ${dmy(dMatin)}.\n\nEn vous souhaitant une bonne journée.`}, `Aprem vac ${a?a.v.id:'-'} volumes=${JSON.stringify(fa?fa.volumes:null)} | Matin vac ${m?m.v.id:'-'} volumes=${JSON.stringify(fm?fm.volumes:null)}`);
+    ouvrirOverlayClient('🤝 CR client — nuit', contenu, `CR_client_nuit_${dMatin}.pdf`, texte, {sujet:`CR de la vacation du ${dmy(dAprem)} au ${dmy(dMatin)} — La Poste Mulhouse`, corps:`Bonjour,\n\nVeuillez trouver en P.J, le CR de la vacation du ${dmy(dAprem)} au ${dmy(dMatin)}.\n\nEn vous souhaitant une bonne journée.`});
   }catch(e){ toast('Erreur chargement du CR client','err'); console.error(e); }
 }
 async function genererCRClientSemaine(){
@@ -2533,9 +2548,15 @@ function txtTri(f){
 }
 function calcFiche(f){
   f = f || ficheVide();
-  const lignes = (f.volumes||[]).map(l=>({...l, distrib: aVal(l.total) ? nI(l.total)-nI(l.disp) : null}));
+  // Saisie : Total + Distribution ; la Dispersion se déduit (total − distribution). Anciennes saisies avec « disp » toujours comprises.
+  const lignes = (f.volumes||[]).map(l=>{ let dist=null, dispC=null;
+    if(aVal(l.total)){ const T=nI(l.total);
+      if(aVal(l.dist)){ dist=nI(l.dist); dispC=T-dist; }
+      else if(aVal(l.disp)){ dispC=nI(l.disp); dist=T-dispC; }
+      else { dist=0; dispC=T; } }
+    return {...l, distrib:dist, dispC}; });
   const sumTot = lignes.reduce((a,l)=>a+nI(l.total),0);
-  const sumDisp = lignes.reduce((a,l)=>a+(aVal(l.total)?nI(l.disp):0),0);
+  const sumDisp = lignes.reduce((a,l)=>a+(l.dispC||0),0);
   const sumDist = lignes.reduce((a,l)=>a+(l.distrib||0),0);
   const hn = nI(f.hn);
   const liaisons = ((f.conc||{}).liaisons||[]).map(li=>({...li, somme:(li.camions||[]).reduce((a,c)=>a+nI(c.colis),0)}));
@@ -2617,7 +2638,7 @@ function htmlAbsents(f){
 function fAddAbsent(){ fStruct(f=>{ f.absents=f.absents||[]; f.absents.push({nom:'',motif:MOTIFS_ABS[0]}); }); }
 function fDelAbsent(i){ fStruct(f=>f.absents.splice(i,1)); }
 function fNomAbs(i,v){ const c=nomCanon(v); if(S.fiche.absents[i]){ S.fiche.absents[i].nom=c; const k=normNom(c); if(k){ S.nomsAbs=S.nomsAbs||{}; if(!S.nomsAbs[k]) S.nomsAbs[k]=c; } } render(); planifierSaveFiche(); }
-function fAddLigne(){ fStruct(f=>f.volumes.push({nom:'Ligne '+(f.volumes.length+1), debut:'', fin:'', total:'', disp:''})); }
+function fAddLigne(){ fStruct(f=>f.volumes.push({nom:'Ligne '+(f.volumes.length+1), debut:'', fin:'', total:'', dist:''})); }
 function fDelLigne(i){ if(!confirm('Supprimer cette ligne ?')) return; fStruct(f=>f.volumes.splice(i,1)); }
 function fAddLiaison(){ fStruct(f=>{ if(f.conc.liaisons.length<4) f.conc.liaisons.push({camions:[{debut:'',fin:'',colis:''}]}); }); }
 function fDelLiaison(l){ if(!confirm('Supprimer cette liaison ?')) return; fStruct(f=>f.conc.liaisons.splice(l,1)); }
@@ -2626,7 +2647,7 @@ function fDelCamion(l,c){ fStruct(f=>f.conc.liaisons[l].camions.splice(c,1)); }
 function fmtN(n){ return (n==null||isNaN(n))?'—':Number(n).toLocaleString('fr-FR'); }
 function rafraichirFiche(){
   const c = calcFiche(S.fiche); const set=(id,t)=>{ const e=document.getElementById(id); if(e) e.textContent=t; };
-  c.lignes.forEach((l,i)=>set('fd-'+i, l.distrib==null?'—':fmtN(l.distrib)));
+  c.lignes.forEach((l,i)=>set('fd-'+i, l.dispC==null?'—':fmtN(l.dispC)));
   set('f-sumDisp',fmtN(c.sumDisp)); set('f-sumDist',fmtN(c.sumDist)); set('f-sumTot',fmtN(c.sumTot)); set('f-totalHN',fmtN(c.totalHN));
   c.liaisons.forEach((li,i)=>set('fl-'+i, fmtN(li.somme))); set('f-totConc',fmtN(c.totConc));
   const eq = S.agent.equipe||'';
@@ -2677,8 +2698,8 @@ function renderFiche(){
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:8px">
         <div><label style="${lbl}">Total colis</label><input type="number" inputmode="numeric" min="0" style="${inp}" value="${l.total}" oninput="fSet('volumes.${i}.total',this.value)" /></div>
-        <div><label style="${lbl}">Dispersion</label><input type="number" inputmode="numeric" min="0" style="${inp}" value="${l.disp}" oninput="fSet('volumes.${i}.disp',this.value)" /></div>
-        <div><label style="${lbl}">Distribution (auto)</label><div id="fd-${i}" style="${inp};background:#e8f0fb;font-weight:700">${l.distrib==null?'—':fmtN(l.distrib)}</div></div>
+        <div><label style="${lbl}">Distribution</label><input type="number" inputmode="numeric" min="0" style="${inp}" value="${l.dist==null?'':l.dist}" oninput="fSet('volumes.${i}.dist',this.value)" /></div>
+        <div><label style="${lbl}">Dispersion (auto)</label><div id="fd-${i}" style="${inp};background:#e8f0fb;font-weight:700">${l.dispC==null?'—':fmtN(l.dispC)}</div></div>
       </div>
     </div>`).join('')}
     <button class="btn-primary" style="background:#1a56a0;margin-bottom:12px" onclick="fAddLigne()">+ Ajouter une ligne</button>
@@ -2786,7 +2807,7 @@ function htmlFiche(f, avecConc, eq){
   if(!f || !c.lignes.length){ out += '<p style="color:#9ca3af">Aucun volume saisi.</p>'; }
   else out += `<table style="width:100%;border-collapse:collapse;font-size:11px">
     <tr style="background:#1a56a0;color:white"><th style="${th}">Ligne</th><th style="${th}">Début</th><th style="${th}">Fin</th><th style="${th}">Dispersion</th><th style="${th}">Distribution</th><th style="${th}">Total</th></tr>
-    ${c.lignes.map(l=>`<tr style="border-bottom:1px solid #eee"><td style="${t0}">${escHtml(l.nom||'—')}</td><td style="${t0}">${l.debut||'—'}</td><td style="${t0}">${l.fin||'—'}</td><td style="${t0}">${aVal(l.total)?fmtN(nI(l.disp)):'—'}</td><td style="${t0}">${l.distrib==null?'—':fmtN(l.distrib)}</td><td style="${t0};font-weight:bold">${aVal(l.total)?fmtN(nI(l.total)):'—'}</td></tr>`).join('')}
+    ${c.lignes.map(l=>`<tr style="border-bottom:1px solid #eee"><td style="${t0}">${escHtml(l.nom||'—')}</td><td style="${t0}">${l.debut||'—'}</td><td style="${t0}">${l.fin||'—'}</td><td style="${t0}">${l.dispC==null?'—':fmtN(l.dispC)}</td><td style="${t0}">${l.distrib==null?'—':fmtN(l.distrib)}</td><td style="${t0};font-weight:bold">${aVal(l.total)?fmtN(nI(l.total)):'—'}</td></tr>`).join('')}
     <tr style="background:#f4f6f9;font-weight:bold"><td style="${t0}" colspan="3">Total équipe</td><td style="${t0}">${fmtN(c.sumDisp)}</td><td style="${t0}">${fmtN(c.sumDist)}</td><td style="${t0}">${fmtN(c.sumTot)}</td></tr>
     <tr><td style="${t0}" colspan="5">HN</td><td style="${t0}">${fmtN(c.hn)}</td></tr>
     <tr style="background:#dcfce7;font-weight:bold"><td style="${t0}" colspan="5">TOTAL COLIS (HN inclus)</td><td style="${t0}">${fmtN(c.totalHN)}</td></tr>
@@ -2880,7 +2901,7 @@ function preparerKPI(raw){
       P.vac.push([{d:v.date},{d:lun},'Concentration',chef, !aVal(f.conc.presents)?'':(aVal(f.conc.prevus)?nI(f.conc.prevus):PREVUS_DEFAUT.conc), aVal(f.conc.presents)?nI(f.conc.presents):'', aVal(f.conc.interim)?nI(f.conc.interim):'',
         '','','','','','','', c.totConc, '','','','','','','','']);
     }
-    c.lignes.forEach(l=>P.vol.push([{d:v.date},{d:lun},eq,l.nom||'',l.debut||'',l.fin||'', aVal(l.total)?nI(l.total):'', aVal(l.total)?nI(l.disp):'', l.distrib==null?'':l.distrib]));
+    c.lignes.forEach(l=>P.vol.push([{d:v.date},{d:lun},eq,l.nom||'',l.debut||'',l.fin||'', aVal(l.total)?nI(l.total):'', l.dispC==null?'':l.dispC, l.distrib==null?'':l.distrib]));
     if(f && /^aprem$/i.test(eq)) c.liaisons.forEach((li,i)=>(li.camions||[]).forEach((cm,k)=>P.conc.push([{d:v.date},{d:lun},i+1,k+1,cm.debut||'',cm.fin||'', aVal(cm.colis)?nI(cm.colis):''])));
     rel.forEach(c2=>P.rel.push([{d:v.date},{d:lun},eq,c2.session_numero||1,c2.ligne_numero||1,c2.heure_controle||'',c2.quantite_colis,c2.cadence_ok===false?'NON':'OUI',c2.cadence_ok===false?(c2.raison_non_atteinte||''):'',c2.arret_machine_cumul||0]));
     x.anos.forEach(a=>P.ano.push([{d:v.date},{d:lun},eq,a.type_anomalie||'AUTRE',a.brin_mep||'',a.description||'']));
@@ -3292,6 +3313,7 @@ function demarrerClotureAuto(){
 
 async function verifierClotureAuto(){
   // Le créneau de saisie vient de s'ouvrir : on charge la vacation
+  if(S.agent && S.vacTerminee && S.lockUntil && Date.now() < S.lockUntil) return;
   if(S.agent && S.horsFenetre && fenetreSaisieOuverte(S.agent.equipe)){
     S.horsFenetre = false; S.loading = true; render();
     try{ await chargerTout(); }catch(e){ console.error(e); }
