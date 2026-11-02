@@ -1800,8 +1800,24 @@ function renderClient(){
     <label class="form-label">Semaine du lundi</label><input type="date" id="cl-lundi" style="${inp}" value="${lun}" />
     <button class="btn-primary" onclick="genererCRClientSemaine()">🤝 Générer le CR client de la semaine</button></div>`;
 }
-function ouvrirOverlayClient(titre, contenu, nom, texte){
-  window._nomPdfPartage = nom; window._texteResume = texte;
+function dmy(iso){ const p=iso.split('-'); return p[2]+'/'+p[1]+'/'+p[0]; }
+function numSemaineISO(iso){ const d=new Date(iso+'T12:00:00'); const j=(d.getDay()+6)%7; d.setDate(d.getDate()-j+3); const y=d.getFullYear(); const j1=new Date(y,0,4,12); return 1+Math.round(((d-j1)/86400000-3+((j1.getDay()+6)%7))/7); }
+async function ouvrirMailClient(){
+  const m = window._mailClient; if(!m) return;
+  let cfg = null; try{ const r = await db.get('cr_client_config','select=*&id=eq.1'); cfg = r[0]; }catch(e){}
+  if(!cfg || !cfg.destinataires){ toast("Adresses du client introuvables : lancez le SQL « 9_cr_client_mail.sql » dans Supabase",'err'); return; }
+  const q = 'subject='+encodeURIComponent(m.sujet)+(cfg.copie?'&cc='+encodeURIComponent(cfg.copie):'')+'&body='+encodeURIComponent(m.corps);
+  window.location.href = 'mailto:'+cfg.destinataires+'?'+q;
+}
+async function telechargerPDFClient(){
+  const el = document.getElementById('pdf-content'); if(!el) return;
+  if(typeof html2pdf==='undefined'){ toast('Module PDF non chargé (vérifiez la connexion)','err'); return; }
+  toast('Préparation du PDF…','ok');
+  try{ await html2pdf().set({margin:8, filename:window._nomPdfPartage||'CR_client.pdf', image:{type:'jpeg',quality:0.85}, html2canvas:{scale:1.5,useCORS:true}, jsPDF:{unit:'mm',format:'a4',orientation:'portrait'}, pagebreak:{mode:['css','legacy']}}).from(el).save(); toast('PDF téléchargé','ok'); }
+  catch(e){ toast('Erreur lors de la création du PDF','err'); console.error(e); }
+}
+function ouvrirOverlayClient(titre, contenu, nom, texte, mail){
+  window._nomPdfPartage = nom; window._texteResume = texte; window._mailClient = mail||null;
   const old = document.getElementById('pdf-overlay'); if(old) old.remove();
   const overlay = document.createElement('div'); overlay.id = 'pdf-overlay';
   overlay.style.cssText = 'position:fixed;inset:0;background:white;z-index:999;overflow-y:auto;padding:0';
@@ -1809,7 +1825,8 @@ function ouvrirOverlayClient(titre, contenu, nom, texte){
       <span style="color:white;font-weight:700;font-size:15px">${titre}</span>
       <div style="display:flex;gap:8px">
         <button onclick="partagerPDF()" style="padding:8px 16px;background:#16a34a;color:white;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">📤 Partager</button>
-        <button onclick="copierResume()" style="padding:8px 12px;background:#fef3c7;color:#92400e;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">📋 Copier le résumé</button>
+        <button onclick="telechargerPDFClient()" style="padding:8px 12px;background:white;color:#1a56a0;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">📥 PDF</button>
+        <button onclick="ouvrirMailClient()" style="padding:8px 12px;background:#fef3c7;color:#92400e;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">✉️ Mail</button>
         <button onclick="fermerPDF()" style="padding:8px 14px;background:rgba(255,255,255,0.2);color:white;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">✕ Fermer</button>
       </div></div><div id="pdf-content">${contenu}</div>`;
   document.body.appendChild(overlay);
@@ -1871,7 +1888,7 @@ async function genererCRClientNuit(){
       :'<p style="color:#16a34a;font-weight:bold">✅ Aucune anomalie signalée.</p>'}
     </div>`;
     const texte = `Compte rendu de la nuit (Aprem ${fmtJ(dAprem)} — Matin ${fmtJ(dMatin)}) — La Poste Mulhouse\nColis : ${fmtN(T.sans.total)} (hors Concentration), ${fmtN(T.avec)} avec Concentration\nEffectifs présents : Aprem ${pres(fa,false)}, Matin ${pres(fm,false)}, Concentration ${pres(fa,true)}\nAnomalies : ${anos.length}\nDétail dans le PDF joint.`;
-    ouvrirOverlayClient('🤝 CR client — nuit', contenu, `CR_client_nuit_${dMatin}.pdf`, texte);
+    ouvrirOverlayClient('🤝 CR client — nuit', contenu, `CR_client_nuit_${dMatin}.pdf`, texte, {sujet:`CR de la vacation du ${dmy(dAprem)} au ${dmy(dMatin)} — La Poste Mulhouse`, corps:`Bonjour,\n\nVeuillez trouver en P.J, le CR de la vacation du ${dmy(dAprem)} au ${dmy(dMatin)}.\n\nEn vous souhaitant une bonne journée.`});
   }catch(e){ toast('Erreur chargement du CR client','err'); console.error(e); }
 }
 async function genererCRClientSemaine(){
@@ -1912,7 +1929,7 @@ async function genererCRClientSemaine(){
     </div>`;
     const parType = TYPES_ANOMALIE.map(t=>({t,n:anos.filter(a=>a.type_anomalie===t.code).length})).filter(x=>x.n);
     const texte = `Compte rendu de la semaine du ${fmtJ(from)} au ${fmtJ(to)} — La Poste Mulhouse\nColis : ${fmtN(sans)} (hors Concentration), ${fmtN(avec)} avec Concentration\nAnomalies : ${anos.length}${parType.length?' ('+parType.map(x=>x.t.code+' '+x.n).join(', ')+')':''}\nDétail dans le PDF joint.`;
-    ouvrirOverlayClient('🤝 CR client — semaine', contenu, `CR_client_semaine_${from}.pdf`, texte);
+    ouvrirOverlayClient('🤝 CR client — semaine', contenu, `CR_client_semaine_${from}.pdf`, texte, {sujet:`CR de la semaine S${numSemaineISO(from)} — La Poste Mulhouse`, corps:`Bonjour,\n\nVeuillez trouver en P.J, le CR de la semaine S${numSemaineISO(from)}.\n\nEn vous souhaitant un bon Week-end.`});
   }catch(e){ toast('Erreur chargement du CR client','err'); console.error(e); }
 }
 
