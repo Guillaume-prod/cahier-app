@@ -1858,12 +1858,30 @@ function ouvrirOverlayClient(titre, contenu, nom, texte, mail, debug){
   overlay.innerHTML = `<div style="position:sticky;top:0;background:#1a56a0;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;z-index:10">
       <span style="color:white;font-weight:700;font-size:15px">${titre}</span>
       <div style="display:flex;gap:8px">
-        <button onclick="partagerPDF()" style="padding:8px 16px;background:#16a34a;color:white;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">📤 Partager</button>
+        <button id="btn-partager-client" onclick="partagerPDFClient()" style="padding:8px 16px;background:#9ca3af;color:white;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">⏳ PDF…</button>
         <button onclick="telechargerPDFClient()" style="padding:8px 12px;background:white;color:#1a56a0;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">📥 PDF</button>
         <button onclick="fermerPDF()" style="padding:8px 14px;background:rgba(255,255,255,0.2);color:white;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">✕ Fermer</button>
       </div></div>${debug&&S.agent&&S.agent.est_responsable?`<div style="background:#fef9c3;color:#713f12;font:11px monospace;padding:8px;word-break:break-all">🔧 Diagnostic (responsable) : ${escHtml(debug)}</div>`:''}<div id="pdf-content">${contenu}</div>`;
   document.body.appendChild(overlay);
   window._cfgClient = null; chargerCfgClient();
+  // Le PDF est préparé d'avance : le menu de partage s'ouvre alors instantanément au clic
+  window._pdfClient = null; const nomPrep = nom;
+  setTimeout(async ()=>{
+    const el = document.getElementById('pdf-content'); const b = document.getElementById('btn-partager-client');
+    if(!el || typeof html2pdf==='undefined'){ if(b){ b.style.background='#16a34a'; b.textContent='📤 Partager'; } return; }
+    try{ window._pdfClient = await html2pdf().set({margin:8, filename:nomPrep, image:{type:'jpeg',quality:0.85}, html2canvas:{scale:1.5,useCORS:true}, jsPDF:{unit:'mm',format:'a4',orientation:'portrait'}, pagebreak:{mode:['css','legacy']}}).from(el).outputPdf('blob'); }catch(e){ console.error(e); window._pdfClient = null; }
+    const b2 = document.getElementById('btn-partager-client'); if(b2){ b2.style.background='#16a34a'; b2.textContent='📤 Partager'; }
+  }, 400);
+}
+async function partagerPDFClient(){
+  const nom = window._nomPdfPartage || 'CR_client.pdf';
+  if(!window._pdfClient){ if(document.getElementById('btn-partager-client') && document.getElementById('btn-partager-client').textContent.includes('⏳')){ toast('PDF en préparation… réessayez dans quelques secondes','ok'); return; } return partagerPDF(); }
+  const blob = window._pdfClient; const file = new File([blob], nom, {type:'application/pdf'});
+  const telecharger = ()=>{ const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = nom; document.body.appendChild(a); a.click(); a.remove(); };
+  try{
+    if(navigator.canShare && navigator.canShare({files:[file]})){ await navigator.share({files:[file], title:window._titrePartage||nom.replace('.pdf',''), text:window._texteResume||''}); }
+    else { telecharger(); toast('PDF téléchargé','ok'); }
+  }catch(e){ if(e && e.name==='AbortError') return; console.warn('share', e); telecharger(); toast('Partage refusé : PDF téléchargé','ok'); }
 }
 async function meilleureVacCR(date, equipes){
   // Même choix de vacation que le rapport de nuit (on garde la plus remplie quand il y en a plusieurs le même jour)
