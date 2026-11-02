@@ -1818,21 +1818,30 @@ function renderClient(){
 function dmy(iso){ const p=iso.split('-'); return p[2]+'/'+p[1]+'/'+p[0]; }
 function numSemaineISO(iso){ const d=new Date(iso+'T12:00:00'); const j=(d.getDay()+6)%7; d.setDate(d.getDate()-j+3); const y=d.getFullYear(); const j1=new Date(y,0,4,12); return 1+Math.round(((d-j1)/86400000-3+((j1.getDay()+6)%7))/7); }
 async function chargerCfgClient(){ try{ const r = await db.get('cr_client_config','select=*&id=eq.1'); window._cfgClient = r[0]||null; }catch(e){ window._cfgClient = null; } }
+async function copierTexteClient(t, msg){ try{ await navigator.clipboard.writeText(t); toast('📋 '+msg+' copié','ok'); }catch(e){ toast('Copie impossible','err'); } }
 function ouvrirMailClient(){
   const m = window._mailClient; if(!m) return;
   const cfg = window._cfgClient;
   if(!cfg || !cfg.destinataires){ toast("Adresses du client introuvables : lancez le SQL « 9_cr_client_mail.sql » dans Supabase",'err'); chargerCfgClient(); return; }
   const e = encodeURIComponent, to = cfg.destinataires.replace(/,/g,';'), cc = (cfg.copie||'').replace(/,/g,';');
   const params = 'to='+e(to)+(cc?'&cc='+e(cc):'')+'&subject='+e(m.sujet)+'&body='+e(m.corps);
-  const ua = navigator.userAgent;
-  if(/Android/i.test(ua)){
-    // Android : on cible directement l'application Outlook
-    window.location.href = 'intent://compose?'+params+'#Intent;scheme=ms-outlook;package=com.microsoft.office.outlook;end';
-  } else if(/iPhone|iPad/i.test(ua)){
-    window.location.href = 'ms-outlook://compose?'+params;
-  } else {
-    window.open('https://outlook.office.com/mail/deeplink/compose?'+params,'_blank');
-  }
+  window._mailTmp = {to, cc, sujet:m.sujet, corps:m.corps};
+  const old = document.getElementById('mail-panel'); if(old) old.remove();
+  const btn = 'display:block;width:100%;box-sizing:border-box;padding:12px;margin-bottom:8px;border-radius:10px;font-weight:700;font-size:14px;text-align:center;text-decoration:none;border:none;cursor:pointer;';
+  const d = document.createElement('div'); d.id = 'mail-panel';
+  d.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;display:flex;align-items:flex-end;justify-content:center';
+  d.innerHTML = `<div style="background:white;width:100%;max-width:480px;border-radius:16px 16px 0 0;padding:16px;max-height:90vh;overflow-y:auto">
+    <div style="font-weight:800;font-size:16px;margin-bottom:10px">✉️ Envoyer par Outlook</div>
+    <a href="ms-outlook://compose?${params}" style="${btn}background:#0f6cbd;color:white">Ouvrir l'application Outlook</a>
+    <a href="https://outlook.office.com/mail/deeplink/compose?${params}" target="_blank" rel="noopener" style="${btn}background:#e8f0fb;color:#1a56a0">Ouvrir Outlook sur le web</a>
+    <div style="font-size:12px;color:#6b7280;margin:10px 0 6px">Si le message s'ouvre vide, copiez les éléments puis collez-les dans Outlook :</div>
+    <button onclick="copierTexteClient(window._mailTmp.to,'Destinataires')" style="${btn}background:#f4f6f9;color:#1f2937">📋 Copier les destinataires (À)</button>
+    <button onclick="copierTexteClient(window._mailTmp.cc,'Copie')" style="${btn}background:#f4f6f9;color:#1f2937">📋 Copier la copie (Cc)</button>
+    <button onclick="copierTexteClient(window._mailTmp.sujet,'Objet')" style="${btn}background:#f4f6f9;color:#1f2937">📋 Copier l'objet</button>
+    <button onclick="copierTexteClient(window._mailTmp.corps,'Texte')" style="${btn}background:#f4f6f9;color:#1f2937">📋 Copier le texte du mail</button>
+    <button onclick="document.getElementById('mail-panel').remove()" style="${btn}background:#fee2e2;color:#dc2626;margin-bottom:0">Fermer</button>
+  </div>`;
+  document.body.appendChild(d);
 }
 async function telechargerPDFClient(){
   const el = document.getElementById('pdf-content'); if(!el) return;
