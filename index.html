@@ -1817,20 +1817,22 @@ function renderClient(){
 }
 function dmy(iso){ const p=iso.split('-'); return p[2]+'/'+p[1]+'/'+p[0]; }
 function numSemaineISO(iso){ const d=new Date(iso+'T12:00:00'); const j=(d.getDay()+6)%7; d.setDate(d.getDate()-j+3); const y=d.getFullYear(); const j1=new Date(y,0,4,12); return 1+Math.round(((d-j1)/86400000-3+((j1.getDay()+6)%7))/7); }
-async function ouvrirMailClient(){
+async function chargerCfgClient(){ try{ const r = await db.get('cr_client_config','select=*&id=eq.1'); window._cfgClient = r[0]||null; }catch(e){ window._cfgClient = null; } }
+function ouvrirMailClient(){
   const m = window._mailClient; if(!m) return;
-  let cfg = null; try{ const r = await db.get('cr_client_config','select=*&id=eq.1'); cfg = r[0]; }catch(e){}
-  if(!cfg || !cfg.destinataires){ toast("Adresses du client introuvables : lancez le SQL « 9_cr_client_mail.sql » dans Supabase",'err'); return; }
+  const cfg = window._cfgClient;
+  if(!cfg || !cfg.destinataires){ toast("Adresses du client introuvables : lancez le SQL « 9_cr_client_mail.sql » dans Supabase",'err'); chargerCfgClient(); return; }
   const e = encodeURIComponent, to = cfg.destinataires.replace(/,/g,';'), cc = (cfg.copie||'').replace(/,/g,';');
   const params = 'to='+e(to)+(cc?'&cc='+e(cc):'')+'&subject='+e(m.sujet)+'&body='+e(m.corps);
-  const web = 'https://outlook.office.com/mail/deeplink/compose?'+params;
-  if(/Android|iPhone|iPad/i.test(navigator.userAgent)){
-    // Téléphone : application Outlook ; si elle ne s'ouvre pas, Outlook sur le web
-    let parti = false; const onv = ()=>{ if(document.visibilityState==='hidden') parti = true; };
-    document.addEventListener('visibilitychange', onv);
+  const ua = navigator.userAgent;
+  if(/Android/i.test(ua)){
+    // Android : on cible directement l'application Outlook
+    window.location.href = 'intent://compose?'+params+'#Intent;scheme=ms-outlook;package=com.microsoft.office.outlook;end';
+  } else if(/iPhone|iPad/i.test(ua)){
     window.location.href = 'ms-outlook://compose?'+params;
-    setTimeout(()=>{ document.removeEventListener('visibilitychange', onv); if(!parti) window.open(web,'_blank'); }, 2000);
-  } else { window.open(web,'_blank'); }
+  } else {
+    window.open('https://outlook.office.com/mail/deeplink/compose?'+params,'_blank');
+  }
 }
 async function telechargerPDFClient(){
   const el = document.getElementById('pdf-content'); if(!el) return;
@@ -1853,6 +1855,7 @@ function ouvrirOverlayClient(titre, contenu, nom, texte, mail, debug){
         <button onclick="fermerPDF()" style="padding:8px 14px;background:rgba(255,255,255,0.2);color:white;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">✕ Fermer</button>
       </div></div>${debug&&S.agent&&S.agent.est_responsable?`<div style="background:#fef9c3;color:#713f12;font:11px monospace;padding:8px;word-break:break-all">🔧 Diagnostic (responsable) : ${escHtml(debug)}</div>`:''}<div id="pdf-content">${contenu}</div>`;
   document.body.appendChild(overlay);
+  window._cfgClient = null; chargerCfgClient();
 }
 async function meilleureVacCR(date, equipes){
   // Même choix de vacation que le rapport de nuit (on garde la plus remplie quand il y en a plusieurs le même jour)
