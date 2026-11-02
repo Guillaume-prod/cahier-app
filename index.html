@@ -1816,7 +1816,7 @@ async function telechargerPDFClient(){
   try{ await html2pdf().set({margin:8, filename:window._nomPdfPartage||'CR_client.pdf', image:{type:'jpeg',quality:0.85}, html2canvas:{scale:1.5,useCORS:true}, jsPDF:{unit:'mm',format:'a4',orientation:'portrait'}, pagebreak:{mode:['css','legacy']}}).from(el).save(); toast('PDF téléchargé','ok'); }
   catch(e){ toast('Erreur lors de la création du PDF','err'); console.error(e); }
 }
-function ouvrirOverlayClient(titre, contenu, nom, texte, mail){
+function ouvrirOverlayClient(titre, contenu, nom, texte, mail, debug){
   window._nomPdfPartage = nom; window._texteResume = texte; window._mailClient = mail||null;
   const old = document.getElementById('pdf-overlay'); if(old) old.remove();
   const overlay = document.createElement('div'); overlay.id = 'pdf-overlay';
@@ -1828,7 +1828,7 @@ function ouvrirOverlayClient(titre, contenu, nom, texte, mail){
         <button onclick="telechargerPDFClient()" style="padding:8px 12px;background:white;color:#1a56a0;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">📥 PDF</button>
         <button onclick="ouvrirMailClient()" style="padding:8px 12px;background:#fef3c7;color:#92400e;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">✉️ Mail</button>
         <button onclick="fermerPDF()" style="padding:8px 14px;background:rgba(255,255,255,0.2);color:white;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">✕ Fermer</button>
-      </div></div><div id="pdf-content">${contenu}</div>`;
+      </div></div>${debug&&S.agent&&S.agent.est_responsable?`<div style="background:#fef9c3;color:#713f12;font:11px monospace;padding:8px;word-break:break-all">🔧 Diagnostic (responsable) : ${escHtml(debug)}</div>`:''}<div id="pdf-content">${contenu}</div>`;
   document.body.appendChild(overlay);
 }
 async function meilleureVacCR(date, equipes){
@@ -1892,7 +1892,7 @@ async function genererCRClientNuit(){
       :'<p style="color:#16a34a;font-weight:bold">✅ Aucune anomalie signalée.</p>'}
     </div>`;
     const texte = `Compte rendu de la nuit (Aprem ${fmtJ(dAprem)} — Matin ${fmtJ(dMatin)}) — La Poste Mulhouse\nColis : ${fmtN(T.sans.total)} (hors Concentration), ${fmtN(T.avec)} avec Concentration\nEffectifs présents : Aprem ${pres(fa,false)}, Matin ${pres(fm,false)}, Concentration ${pres(fa,true)}\nAnomalies : ${anos.length}\nDétail dans le PDF joint.`;
-    ouvrirOverlayClient('🤝 CR client — nuit', contenu, `CR_client_nuit_${dMatin}.pdf`, texte, {sujet:`CR de la vacation du ${dmy(dAprem)} au ${dmy(dMatin)} — La Poste Mulhouse`, corps:`Bonjour,\n\nVeuillez trouver en P.J, le CR de la vacation du ${dmy(dAprem)} au ${dmy(dMatin)}.\n\nEn vous souhaitant une bonne journée.`});
+    ouvrirOverlayClient('🤝 CR client — nuit', contenu, `CR_client_nuit_${dMatin}.pdf`, texte, {sujet:`CR de la vacation du ${dmy(dAprem)} au ${dmy(dMatin)} — La Poste Mulhouse`, corps:`Bonjour,\n\nVeuillez trouver en P.J, le CR de la vacation du ${dmy(dAprem)} au ${dmy(dMatin)}.\n\nEn vous souhaitant une bonne journée.`}, `Aprem vac ${a?a.v.id:'-'} volumes=${JSON.stringify(fa?fa.volumes:null)} | Matin vac ${m?m.v.id:'-'} volumes=${JSON.stringify(fm?fm.volumes:null)}`);
   }catch(e){ toast('Erreur chargement du CR client','err'); console.error(e); }
 }
 async function genererCRClientSemaine(){
