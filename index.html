@@ -1840,7 +1840,7 @@ async function telechargerPDFClient(){
   catch(e){ toast('Erreur lors de la création du PDF','err'); console.error(e); }
 }
 function ouvrirOverlayClient(titre, contenu, nom, texte, mail, debug){
-  window._nomPdfPartage = nom; window._texteResume = texte; window._mailClient = mail||null;
+  window._nomPdfPartage = nom; window._texteResume = mail?mail.corps:texte; window._titrePartage = mail?mail.sujet:null; window._mailClient = mail||null;
   const old = document.getElementById('pdf-overlay'); if(old) old.remove();
   const overlay = document.createElement('div'); overlay.id = 'pdf-overlay';
   overlay.style.cssText = 'position:fixed;inset:0;background:white;z-index:999;overflow-y:auto;padding:0';
@@ -2047,7 +2047,7 @@ async function partagerPDF(nom){
       document.body.appendChild(a); a.click(); a.remove(); };
     if(navigator.canShare && navigator.canShare({files:[file]})){
       try{
-        await navigator.share({files:[file], title:nom.replace('.pdf',''), text: window._texteResume || ('La Poste Mulhouse — '+nom.replace('.pdf','').replace(/_/g,' '))});
+        await navigator.share({files:[file], title:window._titrePartage||nom.replace('.pdf',''), text: window._texteResume || ('La Poste Mulhouse — '+nom.replace('.pdf','').replace(/_/g,' '))});
       }catch(e2){
         if(e2 && e2.name==='AbortError') return;
         // Le téléphone a refusé le partage (délai écoulé après la création du PDF) : on télécharge le PDF à la place
@@ -2285,7 +2285,7 @@ function boutonEnvoi(){
 function validerSansEnvoi(){ fermerPDF(); toast("✅ Rapport vérifié — le chef du Matin enverra le rapport de nuit (il contient l'Aprem)",'ok'); }
 
 function fermerPDF(){
-  window._nomPdfPartage = null; window._texteResume = null;
+  window._nomPdfPartage = null; window._texteResume = null; window._titrePartage = null;
   const overlay = document.getElementById('pdf-overlay');
   if(overlay) overlay.remove();
   const style = document.getElementById('print-style');
