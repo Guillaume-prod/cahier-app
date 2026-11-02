@@ -1821,8 +1821,16 @@ async function ouvrirMailClient(){
   const m = window._mailClient; if(!m) return;
   let cfg = null; try{ const r = await db.get('cr_client_config','select=*&id=eq.1'); cfg = r[0]; }catch(e){}
   if(!cfg || !cfg.destinataires){ toast("Adresses du client introuvables : lancez le SQL « 9_cr_client_mail.sql » dans Supabase",'err'); return; }
-  const q = 'subject='+encodeURIComponent(m.sujet)+(cfg.copie?'&cc='+encodeURIComponent(cfg.copie):'')+'&body='+encodeURIComponent(m.corps);
-  window.location.href = 'mailto:'+cfg.destinataires+'?'+q;
+  const e = encodeURIComponent, to = cfg.destinataires.replace(/,/g,';'), cc = (cfg.copie||'').replace(/,/g,';');
+  const params = 'to='+e(to)+(cc?'&cc='+e(cc):'')+'&subject='+e(m.sujet)+'&body='+e(m.corps);
+  const web = 'https://outlook.office.com/mail/deeplink/compose?'+params;
+  if(/Android|iPhone|iPad/i.test(navigator.userAgent)){
+    // Téléphone : application Outlook ; si elle ne s'ouvre pas, Outlook sur le web
+    let parti = false; const onv = ()=>{ if(document.visibilityState==='hidden') parti = true; };
+    document.addEventListener('visibilitychange', onv);
+    window.location.href = 'ms-outlook://compose?'+params;
+    setTimeout(()=>{ document.removeEventListener('visibilitychange', onv); if(!parti) window.open(web,'_blank'); }, 2000);
+  } else { window.open(web,'_blank'); }
 }
 async function telechargerPDFClient(){
   const el = document.getElementById('pdf-content'); if(!el) return;
@@ -1841,7 +1849,7 @@ function ouvrirOverlayClient(titre, contenu, nom, texte, mail, debug){
       <div style="display:flex;gap:8px">
         <button onclick="partagerPDF()" style="padding:8px 16px;background:#16a34a;color:white;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">📤 Partager</button>
         <button onclick="telechargerPDFClient()" style="padding:8px 12px;background:white;color:#1a56a0;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">📥 PDF</button>
-        <button onclick="ouvrirMailClient()" style="padding:8px 12px;background:#fef3c7;color:#92400e;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">✉️ Mail</button>
+        <button onclick="ouvrirMailClient()" style="padding:8px 12px;background:#fef3c7;color:#92400e;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">✉️ Outlook</button>
         <button onclick="fermerPDF()" style="padding:8px 14px;background:rgba(255,255,255,0.2);color:white;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">✕ Fermer</button>
       </div></div>${debug&&S.agent&&S.agent.est_responsable?`<div style="background:#fef9c3;color:#713f12;font:11px monospace;padding:8px;word-break:break-all">🔧 Diagnostic (responsable) : ${escHtml(debug)}</div>`:''}<div id="pdf-content">${contenu}</div>`;
   document.body.appendChild(overlay);
