@@ -669,8 +669,8 @@ function render(){
   }
   
   const nav = S.agent.est_responsable
-    ? [['epi','🦺','EPI'],['chantiers','📋','Chantiers'],['colis','📦','Colis/h'],['anomalies','⚠️','Anomalies'],['fiche','📝','Fiche'],['pdf','📄','PDF'],['semaine','📊','Semaine'],['kpi','📈','KPI'],['admin','⚙️','Admin']]
-    : [['epi','🦺','EPI'],['chantiers','📋','Chantiers'],['colis','📦','Colis/h'],['anomalies','⚠️','Anomalies'],['fiche','📝','Fiche'],['pdf','📄','PDF']].concat(S.agent.equipe==='Matin'?[['semaine','📊','Semaine']]:[]);
+    ? [['epi','🦺','EPI'],['chantiers','📋','Chantiers'],['colis','📦','Colis/h'],['anomalies','⚠️','Anomalies'],['fiche','📝','Fiche'],['pdf','📄','PDF'],['semaine','📊','Semaine'],['client','🤝','Client'],['kpi','📈','KPI'],['admin','⚙️','Admin']]
+    : [['epi','🦺','EPI'],['chantiers','📋','Chantiers'],['colis','📦','Colis/h'],['anomalies','⚠️','Anomalies'],['fiche','📝','Fiche'],['pdf','📄','PDF']].concat(typeEquipe(S.agent.equipe)==='matin'?[['semaine','📊','Semaine'],['client','🤝','Client']]:[]);
   
   let content = '';
   if(S.horsFenetre && !S.agent.est_responsable) content = renderFermee();
@@ -687,6 +687,7 @@ function render(){
   else if(S.vue==='kpi') content = renderKPI();
   else if(S.vue==='pdf') content = renderPDF();
   else if(S.vue==='semaine') content = renderSemaine();
+  else if(S.vue==='client') content = renderClient();
   else if(S.vue==='admin') content = renderAdmin();
   
   app.innerHTML = `
@@ -1781,6 +1782,138 @@ function photosDe(a){ return CHAMPS_PHOTO.filter(c=>a[c]).map(c=>a[c]); }
 function htmlPhotos(a, mw, mh){
   const p = photosDe(a); if(!p.length) return '—';
   return `<div style="display:flex;gap:4px;flex-wrap:wrap;max-width:${mw*2+8}px">`+p.map(src=>`<img src="${src}" style="max-width:${mw}px;max-height:${mh}px;border-radius:4px" />`).join('')+'</div>';
+}
+
+// ══════════════════════════════════════════════════════════════
+// CR CLIENT : colis par équipe, effectifs, anomalies — sans cadences (chef du Matin + responsable)
+// ══════════════════════════════════════════════════════════════
+function renderClient(){
+  const dM = S.date||getToday();
+  const lun = isoLocal(lundiDe(new Date(dM+'T12:00:00')));
+  const inp = 'width:100%;box-sizing:border-box;padding:10px;border:1.5px solid var(--gris-bord);border-radius:8px;font-size:14px;margin-bottom:10px';
+  return `<div class="card"><div class="card-title">🤝 CR client — nuit</div>
+    <div class="info-banner">Compte rendu pour le client : colis par équipe, effectifs et anomalies. Aucune cadence n'y figure. L'Aprem associée est celle de la veille (le samedi pour un lundi).</div>
+    <label class="form-label">Date du Matin</label><input type="date" id="cl-matin" style="${inp}" value="${dM}" />
+    <button class="btn-primary" onclick="genererCRClientNuit()">🤝 Générer le CR client de la nuit</button></div>
+  <div class="card"><div class="card-title">🤝 CR client — semaine</div>
+    <div class="info-banner">À générer le samedi matin : colis de la semaine et nombre d'anomalies par type.</div>
+    <label class="form-label">Semaine du lundi</label><input type="date" id="cl-lundi" style="${inp}" value="${lun}" />
+    <button class="btn-primary" onclick="genererCRClientSemaine()">🤝 Générer le CR client de la semaine</button></div>`;
+}
+function ouvrirOverlayClient(titre, contenu, nom, texte){
+  window._nomPdfPartage = nom; window._texteResume = texte;
+  const old = document.getElementById('pdf-overlay'); if(old) old.remove();
+  const overlay = document.createElement('div'); overlay.id = 'pdf-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:white;z-index:999;overflow-y:auto;padding:0';
+  overlay.innerHTML = `<div style="position:sticky;top:0;background:#1a56a0;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;z-index:10">
+      <span style="color:white;font-weight:700;font-size:15px">${titre}</span>
+      <div style="display:flex;gap:8px">
+        <button onclick="partagerPDF()" style="padding:8px 16px;background:#16a34a;color:white;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">📤 Partager</button>
+        <button onclick="copierResume()" style="padding:8px 12px;background:#fef3c7;color:#92400e;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">📋 Copier le résumé</button>
+        <button onclick="fermerPDF()" style="padding:8px 14px;background:rgba(255,255,255,0.2);color:white;border:none;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer">✕ Fermer</button>
+      </div></div><div id="pdf-content">${contenu}</div>`;
+  document.body.appendChild(overlay);
+}
+async function meilleureVacCR(date, equipes){
+  const vacs = await db.get('vacations_suivi',`date=eq.${date}&equipe=in.(${equipes})&select=*&order=created_at.desc`);
+  let best = null;
+  for(const v of vacs){
+    const fiche = await chargerFicheDe(v.id);
+    const anos = await db.get('anomalies',`vacation_id=eq.${v.id}&order=created_at.asc`);
+    const score = anos.length + (fiche ? fiche.volumes.length + (aVal(fiche.presents)?1:0) + fiche.conc.liaisons.length : 0);
+    if(!best || score>best.score) best = {score, v, fiche, anos};
+  }
+  return best;
+}
+function htmlCompteursAno(anos, eqDe){
+  const th = 'padding:5px 8px';
+  const n = (t,fn)=>anos.filter(a=>(t?a.type_anomalie===t.code:true)&&(fn?fn(a):true)).length;
+  return `<table style="border-collapse:collapse;margin:6px 0 10px;font-size:12px">
+    <tr style="background:#f4f6f9"><th style="${th};text-align:left">Type d'anomalie</th><th style="${th};text-align:center">Aprem</th><th style="${th};text-align:center">Matin</th><th style="${th};text-align:center">Total</th></tr>
+    ${TYPES_ANOMALIE.map(t=>`<tr style="border-bottom:1px solid #eee"><td style="padding:5px 8px;font-weight:700;color:${t.couleur}">${escHtml(t.label)}</td><td style="padding:5px 8px;text-align:center">${n(t,a=>eqDe(a)==='aprem')}</td><td style="padding:5px 8px;text-align:center">${n(t,a=>eqDe(a)==='matin')}</td><td style="padding:5px 8px;text-align:center;font-weight:700">${n(t)}</td></tr>`).join('')}
+    <tr style="background:#fef3c7;font-weight:700"><td style="padding:5px 8px">Total</td><td style="padding:5px 8px;text-align:center">${n(null,a=>eqDe(a)==='aprem')}</td><td style="padding:5px 8px;text-align:center">${n(null,a=>eqDe(a)==='matin')}</td><td style="padding:5px 8px;text-align:center">${anos.length}</td></tr></table>`;
+}
+async function genererCRClientNuit(){
+  const dMatin = document.getElementById('cl-matin')?.value; if(!dMatin) return toast('Choisissez une date','err');
+  const dAprem = apremDe(dMatin);
+  toast('⏳ Chargement…','info');
+  try{
+    const a = await meilleureVacCR(dAprem,'Aprem,Soir%C3%A9e'), m = await meilleureVacCR(dMatin,'Matin,Nuit');
+    if(!a && !m){ toast('Aucune vacation trouvée pour ces dates','err'); return; }
+    const fa = a?a.fiche:null, fm = m?m.fiche:null; const T = totauxNuit(fa, fm);
+    const th = 'padding:6px', t0 = 'padding:6px;text-align:center';
+    const anos = [].concat((a?a.anos:[]).map(x=>({...x,_eq:'aprem',_j:dAprem})), (m?m.anos:[]).map(x=>({...x,_eq:'matin',_j:dMatin})));
+    const fmtJ = d=>new Date(d+'T12:00:00').toLocaleDateString('fr-FR',{weekday:'short',day:'2-digit',month:'2-digit'});
+    const row = (n,x,bg)=>`<tr style="border-bottom:1px solid #eee;${bg?'background:'+bg+';font-weight:bold':''}"><td style="padding:6px">${n}</td><td style="${t0}">${fmtN(x.disp)}</td><td style="${t0}">${fmtN(x.dist)}</td><td style="${t0}">${fmtN(x.hn)}</td><td style="${t0};font-weight:bold">${fmtN(x.total)}</td></tr>`;
+    const pres = (f,conc)=>{ const p = f?(conc?f.conc.presents:f.presents):''; return aVal(p)?nI(p):'—'; };
+    const contenu = `<div style="font-family:Arial,sans-serif;padding:20px;max-width:800px;margin:0 auto;font-size:12px">
+      <h1 style="color:#1a56a0;border-bottom:3px solid #1a56a0;padding-bottom:8px;font-size:18px">Compte rendu de la nuit — La Poste Mulhouse</h1>
+      <p><strong>Aprem du</strong> ${fmtJ(dAprem)} <strong>— Matin du</strong> ${fmtJ(dMatin)}</p>
+      <h3 style="color:#1a56a0;font-size:14px;margin:14px 0 8px;border-left:4px solid #1a56a0;padding-left:8px">📦 Colis</h3>
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <tr style="background:#1a56a0;color:white"><th style="${th};text-align:left"></th><th style="${th}">Dispersion</th><th style="${th}">Distribution</th><th style="${th}">HN</th><th style="${th}">Total colis</th></tr>
+        ${row('🌆 Équipe Aprem',{disp:T.a.sumDisp,dist:T.a.sumDist,hn:T.a.hn,total:T.a.totalHN})}
+        ${row('☀️ Équipe Matin',{disp:T.m.sumDisp,dist:T.m.sumDist,hn:T.m.hn,total:T.m.totalHN})}
+        ${row('TOTAL sans Concentration',T.sans,'#dcfce7')}
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px">🚚 Concentration (colis chargés)</td><td style="${t0}" colspan="3">—</td><td style="${t0}">${fmtN(T.conc)}</td></tr>
+        <tr style="background:#ccfbf1;font-weight:bold"><td style="padding:6px">TOTAL avec Concentration</td><td style="${t0}" colspan="3">—</td><td style="${t0}">${fmtN(T.avec)}</td></tr>
+      </table>
+      <h3 style="color:#1a56a0;font-size:14px;margin:14px 0 8px;border-left:4px solid #1a56a0;padding-left:8px">👥 Effectifs présents</h3>
+      <table style="width:100%;border-collapse:collapse;font-size:12px"><tr style="background:#1a56a0;color:white"><th style="${th};text-align:left"></th><th style="${th}">Présents</th></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px">🌆 Aprem</td><td style="${t0}">${pres(fa,false)}</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px">☀️ Matin</td><td style="${t0}">${pres(fm,false)}</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px">🚚 Concentration</td><td style="${t0}">${pres(fa,true)}</td></tr></table>
+      <h3 style="color:#d97706;font-size:14px;margin:14px 0 8px;border-left:4px solid #d97706;padding-left:8px">⚠️ Anomalies (${anos.length})</h3>
+      ${anos.length?`${htmlCompteursAno(anos,x=>x._eq)}
+      <table style="width:100%;border-collapse:collapse;font-size:11px"><tr style="background:#d97706;color:white"><th style="${th};text-align:left">Équipe</th><th style="${th};text-align:left">Type</th><th style="${th};text-align:left">Précision</th><th style="${th};text-align:left">Description</th><th style="${th};text-align:left">Photos</th></tr>
+      ${anos.map(x=>{ const t=TYPES_ANOMALIE.find(z=>z.code===x.type_anomalie)||TYPES_ANOMALIE[TYPES_ANOMALIE.length-1];
+        return `<tr style="border-bottom:1px solid #eee;vertical-align:top;page-break-inside:avoid"><td style="padding:5px 6px">${x._eq==='aprem'?'Aprem':'Matin'}</td><td style="padding:5px 6px;font-weight:700;color:${t.couleur}">${escHtml(t.label)}</td><td style="padding:5px 6px">${escHtml(precisionAno(x))}</td><td style="padding:5px 6px">${escHtml(x.description||'—')}</td><td style="padding:5px 6px">${htmlPhotos(x,100,80)}</td></tr>`; }).join('')}</table>`
+      :'<p style="color:#16a34a;font-weight:bold">✅ Aucune anomalie signalée.</p>'}
+    </div>`;
+    const texte = `Compte rendu de la nuit (Aprem ${fmtJ(dAprem)} — Matin ${fmtJ(dMatin)}) — La Poste Mulhouse\nColis : ${fmtN(T.sans.total)} (hors Concentration), ${fmtN(T.avec)} avec Concentration\nEffectifs présents : Aprem ${pres(fa,false)}, Matin ${pres(fm,false)}, Concentration ${pres(fa,true)}\nAnomalies : ${anos.length}\nDétail dans le PDF joint.`;
+    ouvrirOverlayClient('🤝 CR client — nuit', contenu, `CR_client_nuit_${dMatin}.pdf`, texte);
+  }catch(e){ toast('Erreur chargement du CR client','err'); console.error(e); }
+}
+async function genererCRClientSemaine(){
+  const val = document.getElementById('cl-lundi')?.value; if(!val) return toast('Choisissez une date','err');
+  const lun = lundiDe(new Date(val+'T12:00:00')); const dim = new Date(lun); dim.setDate(dim.getDate()+6);
+  const from = isoLocal(lun), to = isoLocal(dim);
+  toast('⏳ Chargement de la semaine…','info');
+  try{
+    let vacs = await db.get('vacations_suivi',`date=gte.${addJours(from,-2)}&date=lte.${to}&select=*&order=date.asc`);
+    vacs = vacs.filter(v=> typeEquipe(v.equipe)==='aprem' ? (v.date>=addJours(from,-2) && v.date<=addJours(from,4)) : (v.date>=from && v.date<=to));
+    if(!vacs.length){ toast('Aucune vacation cette semaine','err'); return; }
+    const ids = vacs.map(v=>v.id).join(',');
+    let [anos, fiches] = await Promise.all([ db.get('anomalies',`vacation_id=in.(${ids})&select=id,vacation_id,type_anomalie`), db.get('fiches_vacation',`vacation_id=in.(${ids})`).catch(()=>[]) ]);
+    const sc = v=>{ const r=fiches.find(x=>String(x.vacation_id)===String(v.id)); const f=r?normFiche(r):null; return anos.filter(a=>a.vacation_id===v.id).length + (f?f.volumes.length+(aVal(f.presents)?1:0)+f.conc.liaisons.length:0); };
+    const best = {}; vacs.forEach(v=>{ const k=v.date+'|'+equipeKpi(v.equipe), n=sc(v); if(n>0&&(!best[k]||n>best[k].n)) best[k]={v,n}; });
+    vacs = Object.values(best).map(x=>x.v);
+    if(!vacs.length){ toast('Aucune saisie cette semaine','err'); return; }
+    const keep = new Set(vacs.map(v=>String(v.id))); anos = anos.filter(a=>keep.has(String(a.vacation_id)));
+    const tot = {aprem:0, matin:0, conc:0};
+    vacs.forEach(v=>{ const r=fiches.find(x=>String(x.vacation_id)===String(v.id)); if(!r) return; const c=calcFiche(normFiche(r)); const t=typeEquipe(v.equipe); if(t==='aprem'){ tot.aprem+=c.totalHN; tot.conc+=c.totConc; } else if(t==='matin') tot.matin+=c.totalHN; });
+    const sans = tot.aprem+tot.matin, avec = sans+tot.conc;
+    const eqDe = a=>{ const v=vacs.find(z=>String(z.id)===String(a.vacation_id)); return typeEquipe(v&&v.equipe); };
+    const fmtJ = d=>new Date(d+'T12:00:00').toLocaleDateString('fr-FR',{weekday:'short',day:'2-digit',month:'2-digit'});
+    const th = 'padding:6px', t0 = 'padding:6px;text-align:center';
+    const contenu = `<div style="font-family:Arial,sans-serif;padding:20px;max-width:800px;margin:0 auto;font-size:12px">
+      <h1 style="color:#1a56a0;border-bottom:3px solid #1a56a0;padding-bottom:8px;font-size:18px">Compte rendu de la semaine — La Poste Mulhouse</h1>
+      <p><strong>Semaine du</strong> ${fmtJ(from)} <strong>au</strong> ${fmtJ(to)}</p>
+      <h3 style="color:#1a56a0;font-size:14px;margin:14px 0 8px;border-left:4px solid #1a56a0;padding-left:8px">📦 Colis de la semaine</h3>
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <tr style="background:#1a56a0;color:white"><th style="${th};text-align:left"></th><th style="${th}">Total colis</th></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px">🌆 Équipe Aprem</td><td style="${t0}">${fmtN(tot.aprem)}</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px">☀️ Équipe Matin</td><td style="${t0}">${fmtN(tot.matin)}</td></tr>
+        <tr style="background:#dcfce7;font-weight:bold"><td style="padding:6px">TOTAL sans Concentration</td><td style="${t0}">${fmtN(sans)}</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px">🚚 Concentration (colis chargés)</td><td style="${t0}">${fmtN(tot.conc)}</td></tr>
+        <tr style="background:#ccfbf1;font-weight:bold"><td style="padding:6px">TOTAL avec Concentration</td><td style="${t0}">${fmtN(avec)}</td></tr></table>
+      <h3 style="color:#d97706;font-size:14px;margin:14px 0 8px;border-left:4px solid #d97706;padding-left:8px">⚠️ Anomalies remontées (${anos.length})</h3>
+      ${anos.length?htmlCompteursAno(anos,eqDe):'<p style="color:#16a34a;font-weight:bold">✅ Aucune anomalie signalée cette semaine.</p>'}
+    </div>`;
+    const parType = TYPES_ANOMALIE.map(t=>({t,n:anos.filter(a=>a.type_anomalie===t.code).length})).filter(x=>x.n);
+    const texte = `Compte rendu de la semaine du ${fmtJ(from)} au ${fmtJ(to)} — La Poste Mulhouse\nColis : ${fmtN(sans)} (hors Concentration), ${fmtN(avec)} avec Concentration\nAnomalies : ${anos.length}${parType.length?' ('+parType.map(x=>x.t.code+' '+x.n).join(', ')+')':''}\nDétail dans le PDF joint.`;
+    ouvrirOverlayClient('🤝 CR client — semaine', contenu, `CR_client_semaine_${from}.pdf`, texte);
+  }catch(e){ toast('Erreur chargement du CR client','err'); console.error(e); }
 }
 
 function renderPDF(){
