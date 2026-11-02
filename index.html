@@ -1648,7 +1648,7 @@ function renderEPIBlocage(){
 const TYPES_ANOMALIE = [
   { code:'ERA',  label:'ERA — Erreur Acheminement Machine', couleur:'#dc2626', bg:'#fee2e2' },
   { code:'PU',   label:'P.U — Pick-Up',                    couleur:'#d97706', bg:'#fef3c7' },
-  { code:'SP',   label:'So Poste — Sous Poste',            couleur:'#7c3aed', bg:'#ede9fe' },
+  { code:'SP',   label:'So Poste',                        couleur:'#7c3aed', bg:'#ede9fe' },
   { code:'MEP',  label:'Mise en Place',                    couleur:'#059669', bg:'#d1fae5' },
   { code:'FACTEO',label:'Facteo (IMEI)',                  couleur:'#0891b2', bg:'#cffafe' },
   { code:'AUTRE',label:'Autre',                            couleur:'#1a56a0', bg:'#e8f0fb' },
@@ -1832,12 +1832,16 @@ function ouvrirOverlayClient(titre, contenu, nom, texte, mail){
   document.body.appendChild(overlay);
 }
 async function meilleureVacCR(date, equipes){
+  // Même choix de vacation que le rapport de nuit (on garde la plus remplie quand il y en a plusieurs le même jour)
   const vacs = await db.get('vacations_suivi',`date=eq.${date}&equipe=in.(${equipes})&select=*&order=created_at.desc`);
   let best = null;
   for(const v of vacs){
     const fiche = await chargerFicheDe(v.id);
     const anos = await db.get('anomalies',`vacation_id=eq.${v.id}&order=created_at.asc`);
-    const score = anos.length + (fiche ? fiche.volumes.length + (aVal(fiche.presents)?1:0) + fiche.conc.liaisons.length : 0);
+    const controles = await db.get('controles_chantiers',`vacation_id=eq.${v.id}&select=id`);
+    const colis = await db.get('controles_colis',`vacation_id=eq.${v.id}&select=quantite_colis`);
+    const epi = await db.get('epi',`vacation_id=eq.${v.id}&select=id`);
+    const score = controles.length + colis.filter(c=>c.quantite_colis).length + epi.length + anos.length + (fiche?fiche.volumes.length+(aVal(fiche.presents)?1:0):0);
     if(!best || score>best.score) best = {score, v, fiche, anos};
   }
   return best;
@@ -1907,8 +1911,8 @@ async function genererCRClientSemaine(){
     vacs = Object.values(best).map(x=>x.v);
     if(!vacs.length){ toast('Aucune saisie cette semaine','err'); return; }
     const keep = new Set(vacs.map(v=>String(v.id))); anos = anos.filter(a=>keep.has(String(a.vacation_id)));
-    const tot = {aprem:0, matin:0, conc:0};
-    vacs.forEach(v=>{ const r=fiches.find(x=>String(x.vacation_id)===String(v.id)); if(!r) return; const c=calcFiche(normFiche(r)); const t=typeEquipe(v.equipe); if(t==='aprem'){ tot.aprem+=c.totalHN; tot.conc+=c.totConc; } else if(t==='matin') tot.matin+=c.totalHN; });
+    const tot = {aprem:0, matin:0, conc:0}, dd = {aprem:{disp:0,dist:0,hn:0}, matin:{disp:0,dist:0,hn:0}};
+    vacs.forEach(v=>{ const r=fiches.find(x=>String(x.vacation_id)===String(v.id)); if(!r) return; const c=calcFiche(normFiche(r)); const t=typeEquipe(v.equipe); if(t==='aprem'){ tot.aprem+=c.totalHN; tot.conc+=c.totConc; } else if(t==='matin') tot.matin+=c.totalHN; if(dd[t]){ dd[t].disp+=c.sumDisp; dd[t].dist+=c.sumDist; dd[t].hn+=c.hn; } });
     const sans = tot.aprem+tot.matin, avec = sans+tot.conc;
     const eqDe = a=>{ const v=vacs.find(z=>String(z.id)===String(a.vacation_id)); return typeEquipe(v&&v.equipe); };
     const fmtJ = d=>new Date(d+'T12:00:00').toLocaleDateString('fr-FR',{weekday:'short',day:'2-digit',month:'2-digit'});
@@ -1918,12 +1922,13 @@ async function genererCRClientSemaine(){
       <p><strong>Semaine du</strong> ${fmtJ(from)} <strong>au</strong> ${fmtJ(to)}</p>
       <h3 style="color:#1a56a0;font-size:14px;margin:14px 0 8px;border-left:4px solid #1a56a0;padding-left:8px">📦 Colis de la semaine</h3>
       <table style="width:100%;border-collapse:collapse;font-size:12px">
-        <tr style="background:#1a56a0;color:white"><th style="${th};text-align:left"></th><th style="${th}">Total colis</th></tr>
-        <tr style="border-bottom:1px solid #eee"><td style="padding:6px">🌆 Équipe Aprem</td><td style="${t0}">${fmtN(tot.aprem)}</td></tr>
-        <tr style="border-bottom:1px solid #eee"><td style="padding:6px">☀️ Équipe Matin</td><td style="${t0}">${fmtN(tot.matin)}</td></tr>
-        <tr style="background:#dcfce7;font-weight:bold"><td style="padding:6px">TOTAL sans Concentration</td><td style="${t0}">${fmtN(sans)}</td></tr>
-        <tr style="border-bottom:1px solid #eee"><td style="padding:6px">🚚 Concentration (colis chargés)</td><td style="${t0}">${fmtN(tot.conc)}</td></tr>
-        <tr style="background:#ccfbf1;font-weight:bold"><td style="padding:6px">TOTAL avec Concentration</td><td style="${t0}">${fmtN(avec)}</td></tr></table>
+        <tr style="background:#1a56a0;color:white"><th style="${th};text-align:left"></th><th style="${th}">Dispersion</th><th style="${th}">Distribution</th><th style="${th}">HN</th><th style="${th}">Total colis</th></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px">🌆 Équipe Aprem</td><td style="${t0}">${fmtN(dd.aprem.disp)}</td><td style="${t0}">${fmtN(dd.aprem.dist)}</td><td style="${t0}">${fmtN(dd.aprem.hn)}</td><td style="${t0};font-weight:bold">${fmtN(tot.aprem)}</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px">☀️ Équipe Matin</td><td style="${t0}">${fmtN(dd.matin.disp)}</td><td style="${t0}">${fmtN(dd.matin.dist)}</td><td style="${t0}">${fmtN(dd.matin.hn)}</td><td style="${t0};font-weight:bold">${fmtN(tot.matin)}</td></tr>
+        <tr style="background:#dcfce7;font-weight:bold"><td style="padding:6px">TOTAL sans Concentration</td><td style="${t0}">${fmtN(dd.aprem.disp+dd.matin.disp)}</td><td style="${t0}">${fmtN(dd.aprem.dist+dd.matin.dist)}</td><td style="${t0}">${fmtN(dd.aprem.hn+dd.matin.hn)}</td><td style="${t0}">${fmtN(sans)}</td></tr>
+        <tr style="border-bottom:1px solid #eee"><td style="padding:6px">🚚 Concentration (colis chargés)</td><td style="${t0}" colspan="3">—</td><td style="${t0}">${fmtN(tot.conc)}</td></tr>
+        <tr style="background:#ccfbf1;font-weight:bold"><td style="padding:6px">TOTAL avec Concentration</td><td style="${t0}" colspan="3">—</td><td style="${t0}">${fmtN(avec)}</td></tr>
+      </table>
       <h3 style="color:#d97706;font-size:14px;margin:14px 0 8px;border-left:4px solid #d97706;padding-left:8px">⚠️ Anomalies remontées (${anos.length})</h3>
       ${anos.length?htmlCompteursAno(anos,eqDe):'<p style="color:#16a34a;font-weight:bold">✅ Aucune anomalie signalée cette semaine.</p>'}
     </div>`;
