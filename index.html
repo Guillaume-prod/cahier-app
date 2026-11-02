@@ -88,6 +88,7 @@ select.form-input{cursor:pointer;}
 
 /* TOAST */
 .toast{position:fixed;top:20px;left:50%;transform:translateX(-50%);padding:10px 20px;border-radius:10px;font-size:14px;font-weight:600;z-index:999;animation:fadeInOut 3s ease forwards;}
+.toast.err{animation-duration:7s;}
 @keyframes fadeInOut{0%{opacity:0;transform:translateX(-50%) translateY(-10px)}15%{opacity:1;transform:translateX(-50%) translateY(0)}85%{opacity:1}100%{opacity:0}}
 .toast.ok{background:#16a34a;color:white;}
 .toast.err{background:#dc2626;color:white;}
@@ -107,6 +108,7 @@ const supabaseAuth = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 const TRANCHES_MATIN = ['00h00 - 01h00','01h00 - 02h00','02h00 - 03h00','03h00 - 04h00','04h00 - 05h00','05h00 - 06h00','06h00 - 07h00','07h00 - 08h00'];
 const TRANCHES_SOIREE = ['15h00 - 16h00','17h00 - 18h00','18h00 - 19h00','19h00 - 20h00','20h00 - 21h00','21h00 - 22h00','22h00 - 23h00','23h00 - 00h00','00h00 - 01h00'];
 const OBJECTIF_COLIS = 2400;
+const APP_VERSION = 'v51';
 
 // Personnel chargé dynamiquement depuis la base
 let PERSONNEL_DB = {}; // { 'Matin': [{id,prenom,nom},...], 'Aprem': [...], 'Soirée': [...] }
@@ -147,7 +149,7 @@ function toast(msg, type='ok'){
   el.className = `toast ${type}`;
   el.textContent = msg;
   document.body.appendChild(el);
-  setTimeout(()=>el.remove(), 3000);
+  setTimeout(()=>el.remove(), type==="err"?7000:3000);
 }
 function fmtDate(d){ return new Date(d).toLocaleDateString('fr-FR',{weekday:'long',day:'2-digit',month:'long',year:'numeric'}); }
 function fmtHeure(iso){ if(!iso) return '—'; const d=new Date(iso.endsWith('Z')?iso:iso+'Z'); return d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}); }
@@ -697,7 +699,7 @@ function render(){
         <div style="font-size:12px;color:var(--texte-doux)">${S.agent.prenom} ${S.agent.nom} ${S.agent.equipe?'· '+S.agent.equipe:''}</div>
       </div>
       <div style="text-align:right">
-        <div style="font-size:12px;color:var(--texte-doux)">${fmtDate(S.date).split(' ').slice(0,2).join(' ')}</div>
+        <div style="font-size:12px;color:var(--texte-doux)">${fmtDate(S.date).split(' ').slice(0,2).join(' ')} · ${APP_VERSION}</div>
         <div style="display:flex;gap:8px">
         ${!S.agent.est_responsable?`<button onclick="setVue('code')" style="font-size:11px;color:var(--bleu);background:none;border:none;cursor:pointer;padding:0">🔑 Code</button>`:''}
         <button onclick="finVacation()" style="font-size:11px;color:var(--orange);background:none;border:none;cursor:pointer;padding:0">🏁 Fin</button>
@@ -1881,7 +1883,7 @@ async function partagerPDFClient(){
   try{
     if(navigator.canShare && navigator.canShare({files:[file]})){ await navigator.share({files:[file], title:window._titrePartage||nom.replace('.pdf',''), text:window._texteResume||''}); }
     else { telecharger(); toast('PDF téléchargé','ok'); }
-  }catch(e){ if(e && e.name==='AbortError') return; console.warn('share', e); telecharger(); toast('Partage refusé : PDF téléchargé','ok'); }
+  }catch(e){ if(e && e.name==='AbortError') return; console.warn('share', e); telecharger(); toast('Partage refusé ['+(e&&e.name||'?')+(e&&e.message?' – '+String(e.message).slice(0,60):'')+'] : PDF téléchargé','err'); }
 }
 async function meilleureVacCR(date, equipes){
   // Même choix de vacation que le rapport de nuit (on garde la plus remplie quand il y en a plusieurs le même jour)
