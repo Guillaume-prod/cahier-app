@@ -108,7 +108,7 @@ const supabaseAuth = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 const TRANCHES_MATIN = ['00h00 - 01h00','01h00 - 02h00','02h00 - 03h00','03h00 - 04h00','04h00 - 05h00','05h00 - 06h00','06h00 - 07h00','07h00 - 08h00'];
 const TRANCHES_SOIREE = ['15h00 - 16h00','17h00 - 18h00','18h00 - 19h00','19h00 - 20h00','20h00 - 21h00','21h00 - 22h00','22h00 - 23h00','23h00 - 00h00','00h00 - 01h00'];
 const OBJECTIF_COLIS = 2400;
-const APP_VERSION = 'v51';
+const APP_VERSION = 'v53';
 
 // Personnel chargé dynamiquement depuis la base
 let PERSONNEL_DB = {}; // { 'Matin': [{id,prenom,nom},...], 'Aprem': [...], 'Soirée': [...] }
@@ -480,7 +480,7 @@ function marquerBienvenueVue(){
 
 function renderBienvenue(){
   const msg = getMessageDuJour();
-  const equipeEmoji = {'Matin':'☀️','Aprem':'🌆','Soirée':'🌙','Nuit':'🌙','Concentration':'📦'}[S.agent.equipe]||'👋';
+  const equipeEmoji = {'Matin':'☀️','Aprem':'🌆','Journée':'🌤️','Soirée':'🌙','Nuit':'🌙','Concentration':'📦'}[S.agent.equipe]||'👋';
   const heureStr = new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
   // Générer les particules
   const particules = Array.from({length:22},(_,i)=>{
@@ -1126,6 +1126,7 @@ function renderModalAgent(){
           <option value="Matin" ${a.equipe==='Matin'?'selected':''}>☀️ Matin</option>
           <option value="Aprem" ${a.equipe==='Aprem'?'selected':''}>🌆 Aprem</option>
           <option value="Soirée" ${a.equipe==='Soirée'?'selected':''}>🌙 Soirée</option>
+          ${(getToday()>='2026-11-16' || a.equipe==='Journée')?`<option value="Journée" ${a.equipe==='Journée'?'selected':''}>🌤️ Journée (23/11 → 23/12)</option>`:''}
         </select>
       </div>
       <div style="display:flex;gap:10px;margin-top:16px">
@@ -1370,7 +1371,7 @@ async function changerCode(){
 }
 
 // ── Déconnexion automatique : Matin à 09h00, Aprem à 01h00 (chefs d'équipe uniquement) ──
-function heureCoupure(ag){ if(!ag||ag.est_responsable) return null; const t=typeEquipe(ag.equipe); return t==='matin'?9:(t==='aprem'?1:null); }
+function heureCoupure(ag){ if(!ag||ag.est_responsable) return null; const t=typeEquipe(ag.equipe); return t==='matin'?9:(t==='aprem'?1:(t==='journee'?20:null)); }
 function prochaineCoupure(tsMs, h){ const d=new Date(tsMs); d.setHours(h,0,0,0); if(d.getTime()<=tsMs) d.setDate(d.getDate()+1); return d.getTime(); }
 async function verifierDeconnexionAuto(){
   if(!S.agent) return; const h = heureCoupure(S.agent); if(h==null) return;
@@ -1394,7 +1395,7 @@ async function deconnexion(){
 }
 
 async function finVacation(){
-  if(!confirm('Terminer cette vacation ?'+((S.agent&&!S.agent.est_responsable&&(S.agent.equipe==='Aprem'||S.agent.equipe==='Matin'))?'\n\nAprès « Fin », vous ne pourrez plus vous reconnecter avant le prochain créneau.':''))) return;
+  if(!confirm('Terminer cette vacation ?'+((S.agent&&!S.agent.est_responsable&&(S.agent.equipe==='Aprem'||S.agent.equipe==='Matin'||S.agent.equipe==='Journée'))?'\n\nAprès « Fin », vous ne pourrez plus vous reconnecter avant le prochain créneau.':''))) return;
   arreterRappelColis();
   if(clotureAutoInterval){ clearInterval(clotureAutoInterval); clotureAutoInterval=null; }
   // Mettre à jour les KPI puis marquer la vacation comme terminée en base
@@ -1409,7 +1410,7 @@ async function finVacation(){
   S.tournees = [];
   S.vue = 'epi';
   toast('✅ Vacation terminée !','ok');
-  { const eq = S.agent.equipe; if(!S.agent.est_responsable && (eq==='Aprem'||eq==='Matin')){ S.horsFenetre = true; S.vacTerminee = true; S.lockUntil = prochainCreneau(eq); } }
+  { const eq = S.agent.equipe; if(!S.agent.est_responsable && (eq==='Aprem'||eq==='Matin'||eq==='Journée')){ S.horsFenetre = true; S.vacTerminee = true; S.lockUntil = prochainCreneau(eq); } }
   render();
 }
 
@@ -1455,12 +1456,13 @@ function fenetreSaisieOuverte(equipe){
   const t = minutesNow();
   if(equipe==='Aprem') return t>=960 || t<60;
   if(equipe==='Matin') return t<540;
+  if(equipe==='Journée') return journeeTravaille(isoLocal(new Date())) && t>=600 && t<1200;
   return true;
 }
-function libelleFenetre(equipe){ return equipe==='Aprem' ? '16h00 à 01h00' : equipe==='Matin' ? '00h00 à 09h00' : ''; }
+function libelleFenetre(equipe){ return equipe==='Aprem' ? '16h00 à 01h00' : equipe==='Matin' ? '00h00 à 09h00' : equipe==='Journée' ? '10h00 à 20h00, du mardi au samedi (23/11 au 23/12/2026)' : ''; }
 // Après « Fin » : plus d'accès jusqu'au prochain créneau (Matin : 00h00 ; Aprem : 16h00) — chefs d'équipe uniquement
-function debutCreneau(equipe){ const n=new Date(), ws=new Date(n); if(equipe==='Matin'){ ws.setHours(0,0,0,0); } else { if(n.getHours()<1) ws.setDate(ws.getDate()-1); ws.setHours(16,0,0,0); } return ws.getTime(); }
-function prochainCreneau(equipe){ const n=new Date(), d=new Date(n); if(equipe==='Matin'){ d.setDate(d.getDate()+1); d.setHours(0,0,0,0); } else { d.setHours(16,0,0,0); if(d.getTime()<=n.getTime()) d.setDate(d.getDate()+1); } return d.getTime(); }
+function debutCreneau(equipe){ const n=new Date(), ws=new Date(n); if(equipe==='Journée'){ ws.setHours(10,0,0,0); } else if(equipe==='Matin'){ ws.setHours(0,0,0,0); } else { if(n.getHours()<1) ws.setDate(ws.getDate()-1); ws.setHours(16,0,0,0); } return ws.getTime(); }
+function prochainCreneau(equipe){ const n=new Date(), d=new Date(n); if(equipe==='Journée'){ d.setDate(d.getDate()+1); d.setHours(10,0,0,0); } else if(equipe==='Matin'){ d.setDate(d.getDate()+1); d.setHours(0,0,0,0); } else { d.setHours(16,0,0,0); if(d.getTime()<=n.getTime()) d.setDate(d.getDate()+1); } return d.getTime(); }
 function renderFermee(){
   const eq = S.agent.equipe;
   if(S.vacTerminee) return `<div class="card" style="text-align:center">
@@ -1497,7 +1499,7 @@ async function getOrCreateVacation(){
     return;
   }
   // Vacation déjà terminée (bouton « Fin ») dans ce créneau : accès fermé jusqu'au prochain créneau
-  if(!S.agent.est_responsable && (equipe==='Aprem'||equipe==='Matin')){
+  if(!S.agent.est_responsable && (equipe==='Aprem'||equipe==='Matin'||equipe==='Journée')){
     const ws = debutCreneau(equipe); const ts = v=>new Date(v.created_at.endsWith('Z')?v.created_at:v.created_at+'Z').getTime();
     if(vacs.some(v=>v.terminee && v.created_at && ts(v)>=ws)){ S.vacationId = null; S.horsFenetre = true; S.vacTerminee = true; S.lockUntil = prochainCreneau(equipe); return; }
   }
@@ -1900,13 +1902,14 @@ async function meilleureVacCR(date, equipes){
   }
   return best;
 }
-function htmlCompteursAno(anos, eqDe){
+function htmlCompteursAno(anos, eqDe, avecJ){
   const th = 'padding:5px 8px';
   const n = (t,fn)=>anos.filter(a=>(t?a.type_anomalie===t.code:true)&&(fn?fn(a):true)).length;
+  const cJ = (t)=>avecJ?`<td style="padding:5px 8px;text-align:center">${n(t,a=>eqDe(a)==='journee')}</td>`:'';
   return `<table style="border-collapse:collapse;margin:6px 0 10px;font-size:12px">
-    <tr style="background:#f4f6f9"><th style="${th};text-align:left">Type d'anomalie</th><th style="${th};text-align:center">Aprem</th><th style="${th};text-align:center">Matin</th><th style="${th};text-align:center">Total</th></tr>
-    ${TYPES_ANOMALIE.map(t=>`<tr style="border-bottom:1px solid #eee"><td style="padding:5px 8px;font-weight:700;color:${t.couleur}">${escHtml(t.label)}</td><td style="padding:5px 8px;text-align:center">${n(t,a=>eqDe(a)==='aprem')}</td><td style="padding:5px 8px;text-align:center">${n(t,a=>eqDe(a)==='matin')}</td><td style="padding:5px 8px;text-align:center;font-weight:700">${n(t)}</td></tr>`).join('')}
-    <tr style="background:#fef3c7;font-weight:700"><td style="padding:5px 8px">Total</td><td style="padding:5px 8px;text-align:center">${n(null,a=>eqDe(a)==='aprem')}</td><td style="padding:5px 8px;text-align:center">${n(null,a=>eqDe(a)==='matin')}</td><td style="padding:5px 8px;text-align:center">${anos.length}</td></tr></table>`;
+    <tr style="background:#f4f6f9"><th style="${th};text-align:left">Type d'anomalie</th><th style="${th};text-align:center">Aprem</th><th style="${th};text-align:center">Matin</th>${avecJ?`<th style="${th};text-align:center">Journée</th>`:''}<th style="${th};text-align:center">Total</th></tr>
+    ${TYPES_ANOMALIE.map(t=>`<tr style="border-bottom:1px solid #eee"><td style="padding:5px 8px;font-weight:700;color:${t.couleur}">${escHtml(t.label)}</td><td style="padding:5px 8px;text-align:center">${n(t,a=>eqDe(a)==='aprem')}</td><td style="padding:5px 8px;text-align:center">${n(t,a=>eqDe(a)==='matin')}</td>${cJ(t)}<td style="padding:5px 8px;text-align:center;font-weight:700">${n(t)}</td></tr>`).join('')}
+    <tr style="background:#fef3c7;font-weight:700"><td style="padding:5px 8px">Total</td><td style="padding:5px 8px;text-align:center">${n(null,a=>eqDe(a)==='aprem')}</td><td style="padding:5px 8px;text-align:center">${n(null,a=>eqDe(a)==='matin')}</td>${cJ(null)}<td style="padding:5px 8px;text-align:center">${anos.length}</td></tr></table>`;
 }
 async function genererCRClientNuit(){
   const dMatin = document.getElementById('cl-matin')?.value; if(!dMatin) return toast('Choisissez une date','err');
@@ -1914,10 +1917,11 @@ async function genererCRClientNuit(){
   toast('⏳ Chargement…','info');
   try{
     const a = await meilleureVacCR(dAprem,'Aprem,Soir%C3%A9e'), m = await meilleureVacCR(dMatin,'Matin,Nuit');
-    if(!a && !m){ toast('Aucune vacation trouvée pour ces dates','err'); return; }
-    const fa = a?a.fiche:null, fm = m?m.fiche:null; const T = totauxNuit(fa, fm);
+    const j = journeeTravaille(dMatin) ? await meilleureVacCR(dMatin,'Journ%C3%A9e') : null;
+    if(!a && !m && !j){ toast('Aucune vacation trouvée pour ces dates','err'); return; }
+    const fa = a?a.fiche:null, fm = m?m.fiche:null, fj = j?j.fiche:null; const T = totauxNuit(fa, fm, fj);
     const th = 'padding:6px', t0 = 'padding:6px;text-align:center';
-    const anos = [].concat((a?a.anos:[]).map(x=>({...x,_eq:'aprem',_j:dAprem})), (m?m.anos:[]).map(x=>({...x,_eq:'matin',_j:dMatin})));
+    const anos = [].concat((a?a.anos:[]).map(x=>({...x,_eq:'aprem',_j:dAprem})), (m?m.anos:[]).map(x=>({...x,_eq:'matin',_j:dMatin})), (j?j.anos:[]).map(x=>({...x,_eq:'journee',_j:dMatin})));
     const fmtJ = d=>new Date(d+'T12:00:00').toLocaleDateString('fr-FR',{weekday:'short',day:'2-digit',month:'2-digit'});
     const row = (n,x,bg)=>`<tr style="border-bottom:1px solid #eee;${bg?'background:'+bg+';font-weight:bold':''}"><td style="padding:6px">${n}</td><td style="${t0}">${fmtN(x.disp)}</td><td style="${t0}">${fmtN(x.dist)}</td><td style="${t0}">${fmtN(x.hn)}</td><td style="${t0};font-weight:bold">${fmtN(x.total)}</td></tr>`;
     const pres = (f,conc)=>{ const p = f?(conc?f.conc.presents:f.presents):''; return aVal(p)?nI(p):'—'; };
@@ -1929,6 +1933,7 @@ async function genererCRClientNuit(){
         <tr style="background:#1a56a0;color:white"><th style="${th};text-align:left"></th><th style="${th}">Dispersion</th><th style="${th}">Distribution</th><th style="${th}">HN</th><th style="${th}">Total colis</th></tr>
         ${row('🌆 Équipe Aprem',{disp:T.a.sumDisp,dist:T.a.sumDist,hn:T.a.hn,total:T.a.totalHN})}
         ${row('☀️ Équipe Matin',{disp:T.m.sumDisp,dist:T.m.sumDist,hn:T.m.hn,total:T.m.totalHN})}
+        ${j?row('🌤️ Équipe Journée',{disp:T.j.sumDisp,dist:T.j.sumDist,hn:T.j.hn,total:T.j.totalHN}):''}
         ${row('TOTAL sans Concentration',T.sans,'#dcfce7')}
         <tr style="border-bottom:1px solid #eee"><td style="padding:6px">🚚 Concentration (colis chargés)</td><td style="${t0}" colspan="3">—</td><td style="${t0}">${fmtN(T.conc)}</td></tr>
         <tr style="background:#ccfbf1;font-weight:bold"><td style="padding:6px">TOTAL avec Concentration</td><td style="${t0}" colspan="3">—</td><td style="${t0}">${fmtN(T.avec)}</td></tr>
@@ -1937,15 +1942,16 @@ async function genererCRClientNuit(){
       <table style="width:100%;border-collapse:collapse;font-size:12px"><tr style="background:#1a56a0;color:white"><th style="${th};text-align:left"></th><th style="${th}">Présents</th></tr>
         <tr style="border-bottom:1px solid #eee"><td style="padding:6px">🌆 Aprem</td><td style="${t0}">${pres(fa,false)}</td></tr>
         <tr style="border-bottom:1px solid #eee"><td style="padding:6px">☀️ Matin</td><td style="${t0}">${pres(fm,false)}</td></tr>
+        ${j?`<tr style="border-bottom:1px solid #eee"><td style="padding:6px">🌤️ Journée</td><td style="${t0}">${pres(fj,false)}</td></tr>`:''}
         <tr style="border-bottom:1px solid #eee"><td style="padding:6px">🚚 Concentration</td><td style="${t0}">${pres(fa,true)}</td></tr></table>
       <h3 style="color:#d97706;font-size:14px;margin:14px 0 8px;border-left:4px solid #d97706;padding-left:8px">⚠️ Anomalies (${anos.length})</h3>
-      ${anos.length?`${htmlCompteursAno(anos,x=>x._eq)}
+      ${anos.length?`${htmlCompteursAno(anos,x=>x._eq,!!j)}
       <table style="width:100%;border-collapse:collapse;font-size:11px"><tr style="background:#d97706;color:white"><th style="${th};text-align:left">Équipe</th><th style="${th};text-align:left">Type</th><th style="${th};text-align:left">Précision</th><th style="${th};text-align:left">Description</th><th style="${th};text-align:left">Photos</th></tr>
       ${anos.map(x=>{ const t=TYPES_ANOMALIE.find(z=>z.code===x.type_anomalie)||TYPES_ANOMALIE[TYPES_ANOMALIE.length-1];
-        return `<tr style="border-bottom:1px solid #eee;vertical-align:top;page-break-inside:avoid"><td style="padding:5px 6px">${x._eq==='aprem'?'Aprem':'Matin'}</td><td style="padding:5px 6px;font-weight:700;color:${t.couleur}">${escHtml(t.label)}</td><td style="padding:5px 6px">${escHtml(precisionAno(x))}</td><td style="padding:5px 6px">${escHtml(x.description||'—')}</td><td style="padding:5px 6px">${htmlPhotos(x,100,80)}</td></tr>`; }).join('')}</table>`
+        return `<tr style="border-bottom:1px solid #eee;vertical-align:top;page-break-inside:avoid"><td style="padding:5px 6px">${x._eq==='aprem'?'Aprem':(x._eq==='journee'?'Journée':'Matin')}</td><td style="padding:5px 6px;font-weight:700;color:${t.couleur}">${escHtml(t.label)}</td><td style="padding:5px 6px">${escHtml(precisionAno(x))}</td><td style="padding:5px 6px">${escHtml(x.description||'—')}</td><td style="padding:5px 6px">${htmlPhotos(x,100,80)}</td></tr>`; }).join('')}</table>`
       :'<p style="color:#16a34a;font-weight:bold">✅ Aucune anomalie signalée.</p>'}
     </div>`;
-    const texte = `Compte rendu de la nuit (Aprem ${fmtJ(dAprem)} — Matin ${fmtJ(dMatin)}) — La Poste Mulhouse\nColis : ${fmtN(T.sans.total)} (hors Concentration), ${fmtN(T.avec)} avec Concentration\nEffectifs présents : Aprem ${pres(fa,false)}, Matin ${pres(fm,false)}, Concentration ${pres(fa,true)}\nAnomalies : ${anos.length}\nDétail dans le PDF joint.`;
+    const texte = `Compte rendu de la nuit (Aprem ${fmtJ(dAprem)} — Matin ${fmtJ(dMatin)}) — La Poste Mulhouse\nColis : ${fmtN(T.sans.total)} (hors Concentration), ${fmtN(T.avec)} avec Concentration\nEffectifs présents : Aprem ${pres(fa,false)}, Matin ${pres(fm,false)}${j?', Journée '+pres(fj,false):''}, Concentration ${pres(fa,true)}\nAnomalies : ${anos.length}\nDétail dans le PDF joint.`;
     ouvrirOverlayClient('🤝 CR client — nuit', contenu, `CR_client_nuit_${dMatin}.pdf`, texte, {sujet:`CR de la vacation du ${dmy(dAprem)} au ${dmy(dMatin)} — La Poste Mulhouse`, corps:`Bonjour,\n\nVeuillez trouver en P.J, le CR de la vacation du ${dmy(dAprem)} au ${dmy(dMatin)}.\n\nEn vous souhaitant une bonne journée.`});
   }catch(e){ toast('Erreur chargement du CR client','err'); console.error(e); }
 }
@@ -1955,8 +1961,8 @@ async function genererCRClientSemaine(){
   const from = isoLocal(lun), to = isoLocal(dim);
   toast('⏳ Chargement de la semaine…','info');
   try{
-    let vacs = await db.get('vacations_suivi',`date=gte.${addJours(from,-2)}&date=lte.${to}&select=*&order=date.asc`);
-    vacs = vacs.filter(v=> typeEquipe(v.equipe)==='aprem' ? (v.date>=addJours(from,-2) && v.date<=addJours(from,4)) : (v.date>=from && v.date<=to));
+    let vacs = await db.get('vacations_suivi',`date=gte.${addJours(from,-5)}&date=lte.${to}&select=*&order=date.asc`);
+    vacs = vacs.filter(v=> lundiMetier(v.date,v.equipe)===from);
     if(!vacs.length){ toast('Aucune vacation cette semaine','err'); return; }
     const ids = vacs.map(v=>v.id).join(',');
     let [anos, fiches] = await Promise.all([ db.get('anomalies',`vacation_id=in.(${ids})&select=id,vacation_id,type_anomalie`), db.get('fiches_vacation',`vacation_id=in.(${ids})`).catch(()=>[]) ]);
@@ -1965,9 +1971,10 @@ async function genererCRClientSemaine(){
     vacs = Object.values(best).map(x=>x.v);
     if(!vacs.length){ toast('Aucune saisie cette semaine','err'); return; }
     const keep = new Set(vacs.map(v=>String(v.id))); anos = anos.filter(a=>keep.has(String(a.vacation_id)));
-    const tot = {aprem:0, matin:0, conc:0}, dd = {aprem:{disp:0,dist:0,hn:0}, matin:{disp:0,dist:0,hn:0}};
-    vacs.forEach(v=>{ const r=fiches.find(x=>String(x.vacation_id)===String(v.id)); if(!r) return; const c=calcFiche(normFiche(r)); const t=typeEquipe(v.equipe); if(t==='aprem'){ tot.aprem+=c.totalHN; tot.conc+=c.totConc; } else if(t==='matin') tot.matin+=c.totalHN; if(dd[t]){ dd[t].disp+=c.sumDisp; dd[t].dist+=c.sumDist; dd[t].hn+=c.hn; } });
-    const sans = tot.aprem+tot.matin, avec = sans+tot.conc;
+    const tot = {aprem:0, matin:0, journee:0, conc:0}, dd = {aprem:{disp:0,dist:0,hn:0}, matin:{disp:0,dist:0,hn:0}, journee:{disp:0,dist:0,hn:0}};
+    const avecJ = vacs.some(v=>typeEquipe(v.equipe)==='journee');
+    vacs.forEach(v=>{ const r=fiches.find(x=>String(x.vacation_id)===String(v.id)); if(!r) return; const c=calcFiche(normFiche(r)); const t=typeEquipe(v.equipe); if(t==='aprem'){ tot.aprem+=c.totalHN; tot.conc+=c.totConc; } else if(t==='matin') tot.matin+=c.totalHN; else if(t==='journee') tot.journee+=c.totalHN; if(dd[t]){ dd[t].disp+=c.sumDisp; dd[t].dist+=c.sumDist; dd[t].hn+=c.hn; } });
+    const sans = tot.aprem+tot.matin+tot.journee, avec = sans+tot.conc;
     const eqDe = a=>{ const v=vacs.find(z=>String(z.id)===String(a.vacation_id)); return typeEquipe(v&&v.equipe); };
     const fmtJ = d=>new Date(d+'T12:00:00').toLocaleDateString('fr-FR',{weekday:'short',day:'2-digit',month:'2-digit'});
     const th = 'padding:6px', t0 = 'padding:6px;text-align:center';
@@ -1979,12 +1986,13 @@ async function genererCRClientSemaine(){
         <tr style="background:#1a56a0;color:white"><th style="${th};text-align:left"></th><th style="${th}">Dispersion</th><th style="${th}">Distribution</th><th style="${th}">HN</th><th style="${th}">Total colis</th></tr>
         <tr style="border-bottom:1px solid #eee"><td style="padding:6px">🌆 Équipe Aprem</td><td style="${t0}">${fmtN(dd.aprem.disp)}</td><td style="${t0}">${fmtN(dd.aprem.dist)}</td><td style="${t0}">${fmtN(dd.aprem.hn)}</td><td style="${t0};font-weight:bold">${fmtN(tot.aprem)}</td></tr>
         <tr style="border-bottom:1px solid #eee"><td style="padding:6px">☀️ Équipe Matin</td><td style="${t0}">${fmtN(dd.matin.disp)}</td><td style="${t0}">${fmtN(dd.matin.dist)}</td><td style="${t0}">${fmtN(dd.matin.hn)}</td><td style="${t0};font-weight:bold">${fmtN(tot.matin)}</td></tr>
-        <tr style="background:#dcfce7;font-weight:bold"><td style="padding:6px">TOTAL sans Concentration</td><td style="${t0}">${fmtN(dd.aprem.disp+dd.matin.disp)}</td><td style="${t0}">${fmtN(dd.aprem.dist+dd.matin.dist)}</td><td style="${t0}">${fmtN(dd.aprem.hn+dd.matin.hn)}</td><td style="${t0}">${fmtN(sans)}</td></tr>
+        ${avecJ?`<tr style="border-bottom:1px solid #eee"><td style="padding:6px">🌤️ Équipe Journée</td><td style="${t0}">${fmtN(dd.journee.disp)}</td><td style="${t0}">${fmtN(dd.journee.dist)}</td><td style="${t0}">${fmtN(dd.journee.hn)}</td><td style="${t0};font-weight:bold">${fmtN(tot.journee)}</td></tr>`:''}
+        <tr style="background:#dcfce7;font-weight:bold"><td style="padding:6px">TOTAL sans Concentration</td><td style="${t0}">${fmtN(dd.aprem.disp+dd.matin.disp+dd.journee.disp)}</td><td style="${t0}">${fmtN(dd.aprem.dist+dd.matin.dist+dd.journee.dist)}</td><td style="${t0}">${fmtN(dd.aprem.hn+dd.matin.hn+dd.journee.hn)}</td><td style="${t0}">${fmtN(sans)}</td></tr>
         <tr style="border-bottom:1px solid #eee"><td style="padding:6px">🚚 Concentration (colis chargés)</td><td style="${t0}" colspan="3">—</td><td style="${t0}">${fmtN(tot.conc)}</td></tr>
         <tr style="background:#ccfbf1;font-weight:bold"><td style="padding:6px">TOTAL avec Concentration</td><td style="${t0}" colspan="3">—</td><td style="${t0}">${fmtN(avec)}</td></tr>
       </table>
       <h3 style="color:#d97706;font-size:14px;margin:14px 0 8px;border-left:4px solid #d97706;padding-left:8px">⚠️ Anomalies remontées (${anos.length})</h3>
-      ${anos.length?htmlCompteursAno(anos,eqDe):'<p style="color:#16a34a;font-weight:bold">✅ Aucune anomalie signalée cette semaine.</p>'}
+      ${anos.length?htmlCompteursAno(anos,eqDe,avecJ):'<p style="color:#16a34a;font-weight:bold">✅ Aucune anomalie signalée cette semaine.</p>'}
     </div>`;
     const parType = TYPES_ANOMALIE.map(t=>({t,n:anos.filter(a=>a.type_anomalie===t.code).length})).filter(x=>x.n);
     const texte = `Compte rendu de la semaine du ${fmtJ(from)} au ${fmtJ(to)} — La Poste Mulhouse\nColis : ${fmtN(sans)} (hors Concentration), ${fmtN(avec)} avec Concentration\nAnomalies : ${anos.length}${parType.length?' ('+parType.map(x=>x.t.code+' '+x.n).join(', ')+')':''}\nDétail dans le PDF joint.`;
@@ -2119,8 +2127,8 @@ async function genererRecapSemaine(){
   toast('Chargement de la semaine…','ok');
   try{
     // Aprem : du samedi précédent au vendredi (l'Aprem du samedi suivant appartient à la semaine suivante) ; Matin et autres : du lundi au dimanche
-    let vacs = await db.get('vacations_suivi',`date=gte.${addJours(from,-2)}&date=lte.${to}&select=*&order=date.asc`);
-    vacs = vacs.filter(v=> typeEquipe(v.equipe)==='aprem' ? (v.date>=addJours(from,-2) && v.date<=addJours(from,4)) : (v.date>=from && v.date<=to));
+    let vacs = await db.get('vacations_suivi',`date=gte.${addJours(from,-5)}&date=lte.${to}&select=*&order=date.asc`);
+    vacs = vacs.filter(v=> lundiMetier(v.date,v.equipe)===from);
     if(!vacs.length){ toast('Aucune vacation cette semaine','err'); return; }
     const ids = vacs.map(v=>v.id).join(',');
     let [colis, epi, anos, ctrl, agents] = await Promise.all([
@@ -2180,14 +2188,7 @@ async function genererRecapSemaine(){
       </table>`:'<p style="color:#9ca3af">Aucune fiche de volumes saisie cette semaine.</p>'}
 
       <h2 style="color:#d97706;font-size:14px;margin:16px 0 8px;border-left:4px solid #d97706;padding-left:8px">⚠️ Anomalies de la semaine (${anos.length})</h2>
-      ${anos.length?`
-      <table style="border-collapse:collapse;margin:6px 0 10px;font-size:12px">
-        <tr style="background:#f4f6f9"><th style="${th}">Type d'anomalie</th><th style="${th};text-align:center">Aprem</th><th style="${th};text-align:center">Matin</th><th style="${th};text-align:center">Total</th></tr>
-        ${TYPES_ANOMALIE.map(t=>{ const l=anos.filter(a=>a.type_anomalie===t.code); const eqOf=a=>{ const v=vacs.find(z=>String(z.id)===String(a.vacation_id)); return typeEquipe(v&&v.equipe); };
-          return `<tr style="border-bottom:1px solid #eee"><td style="padding:5px 8px;font-weight:700;color:${t.couleur}">${escHtml(t.label)}</td><td style="padding:5px 8px;text-align:center">${l.filter(a=>eqOf(a)==='aprem').length}</td><td style="padding:5px 8px;text-align:center">${l.filter(a=>eqOf(a)==='matin').length}</td><td style="padding:5px 8px;text-align:center;font-weight:700">${l.length}</td></tr>`; }).join('')}
-        <tr style="background:#fef3c7;font-weight:700"><td style="padding:5px 8px">Total</td><td style="padding:5px 8px;text-align:center">${anos.filter(a=>{ const v=vacs.find(z=>String(z.id)===String(a.vacation_id)); return typeEquipe(v&&v.equipe)==='aprem'; }).length}</td><td style="padding:5px 8px;text-align:center">${anos.filter(a=>{ const v=vacs.find(z=>String(z.id)===String(a.vacation_id)); return typeEquipe(v&&v.equipe)==='matin'; }).length}</td><td style="padding:5px 8px;text-align:center">${anos.length}</td></tr>
-      </table>
-`:'<p style="color:#16a34a;font-weight:bold">✅ Aucune anomalie signalée cette semaine.</p>'}
+      ${anos.length?htmlCompteursAno(anos, a=>{ const v=vacs.find(z=>String(z.id)===String(a.vacation_id)); return typeEquipe(v&&v.equipe); }, vacs.some(v=>typeEquipe(v.equipe)==='journee')):'<p style="color:#16a34a;font-weight:bold">✅ Aucune anomalie signalée cette semaine.</p>'}
 
       <h2 style="color:#1a56a0;font-size:14px;margin:16px 0 8px;border-left:4px solid #1a56a0;padding-left:8px">🦺 EPI</h2>
       ${epiManq.length?`<table style="width:100%;border-collapse:collapse"><tr style="background:#1a56a0;color:white"><th style="${th}">Jour</th><th style="${th}">Nom</th><th style="${th}">EPI manquant</th><th style="${th}">Solution</th></tr>
@@ -2326,10 +2327,31 @@ function fermerPDF(){
 // ── RAPPORT DE NUIT CONSOLIDÉ ────────────────────────────────────
 // Jours de la « nuit » : l'Aprem du jour J est associé au Matin du lendemain ; l'Aprem du samedi est associé au Matin du lundi
 function jourSemaine(iso){ return new Date(iso+'T12:00:00').getDay(); }
-function matinDe(dateAprem){ return addJours(dateAprem, jourSemaine(dateAprem)===6 ? 2 : 1); }
-function apremDe(dateMatin){ return addJours(dateMatin, jourSemaine(dateMatin)===1 ? -2 : -1); }
-// Semaine « métier » : l'Aprem du samedi/dimanche compte dans la semaine suivante (avec le Matin du lundi)
-function lundiMetier(iso, eq){ const l = lundiIso(iso), j = jourSemaine(iso); return (typeEquipe(eq)==='aprem' && (j===6||j===0)) ? addJours(l,7) : l; }
+// Jours fériés (France + Alsace-Moselle : Vendredi saint et 26 décembre) : non travaillés
+const _feriesCache = {};
+function joursFeries(an){
+  if(_feriesCache[an]) return _feriesCache[an];
+  const a=an%19, b=Math.floor(an/100), c=an%100, d=Math.floor(b/4), e=b%4, f=Math.floor((b+8)/25), g=Math.floor((b-f+1)/3);
+  const h=(19*a+b-d-g+15)%30, i=Math.floor(c/4), k=c%4, l=(32+2*e+2*i-h-k)%7, m=Math.floor((a+11*h+22*l)/451);
+  const mois=Math.floor((h+l-7*m+114)/31), jour=((h+l-7*m+114)%31)+1;
+  const paques=new Date(Date.UTC(an,mois-1,jour,12));
+  const pl=n=>new Date(paques.getTime()+n*86400000).toISOString().slice(0,10);
+  const fx=(mm,dd)=>an+'-'+String(mm).padStart(2,'0')+'-'+String(dd).padStart(2,'0');
+  const r={}; r[fx(1,1)]='Jour de l\'an'; r[pl(-2)]='Vendredi saint'; r[pl(1)]='Lundi de Pâques'; r[fx(5,1)]='Fête du travail'; r[fx(5,8)]='Victoire 1945';
+  r[pl(39)]='Ascension'; r[pl(50)]='Lundi de Pentecôte'; r[fx(7,14)]='Fête nationale'; r[fx(8,15)]='Assomption'; r[fx(11,1)]='Toussaint'; r[fx(11,11)]='Armistice'; r[fx(12,25)]='Noël'; r[fx(12,26)]='Saint-Étienne';
+  return (_feriesCache[an]=r);
+}
+function estFerie(iso){ return !!joursFeries(+iso.slice(0,4))[iso]; }
+// Jour travaillé par les équipes Matin / Aprem : ni dimanche, ni férié
+function estTravaille(iso){ return jourSemaine(iso)!==0 && !estFerie(iso); }
+function matinDe(dateAprem){ let d=addJours(dateAprem,1); while(!estTravaille(d)) d=addJours(d,1); return d; }
+function apremDe(dateMatin){ let d=addJours(dateMatin,-1); while(!estTravaille(d)) d=addJours(d,-1); return d; }
+// Semaine « métier » : l'Aprem compte dans la semaine du Matin qui le suit (samedi, veille de férié…)
+function lundiMetier(iso, eq){ return typeEquipe(eq)==='aprem' ? lundiIso(matinDe(iso)) : lundiIso(iso); }
+// Équipe « Journée » (programmée) : du mardi au samedi, 11h30-18h00, du 23/11/2026 au 23/12/2026
+const JOURNEE_DEBUT='2026-11-23', JOURNEE_FIN='2026-12-23';
+function journeeActive(iso){ return iso>=JOURNEE_DEBUT && iso<=JOURNEE_FIN; }
+function journeeTravaille(iso){ const j=jourSemaine(iso); return journeeActive(iso) && j>=2 && j<=6 && !estFerie(iso); }
 
 function confirmerRapportNuit(){
   const input = document.getElementById('date-rapport-nuit');
@@ -2376,8 +2398,10 @@ async function exporterRapportNuit(dateAprem, dateMatin){
 
     const detailAprem = await chargerDetails(vacsAprem);
     const detailMatin = await chargerDetails(vacsMatin);
+    const vacsJ = journeeTravaille(dateMatin) ? await db.get('vacations_suivi',`date=eq.${dateMatin}&equipe=eq.Journ%C3%A9e&select=*&order=created_at.desc`) : [];
+    const detailJ = await chargerDetails(vacsJ);
 
-    if(!detailAprem && !detailMatin){
+    if(!detailAprem && !detailMatin && !detailJ){
       toast('Aucune vacation trouvée pour ces dates','err');
       return;
     }
@@ -2495,13 +2519,14 @@ async function exporterRapportNuit(dateAprem, dateMatin){
       <div style="font-family:Arial,sans-serif;padding:20px;max-width:800px;margin:0 auto">
         <div style="text-align:center;border-bottom:3px solid #1a56a0;padding-bottom:12px;margin-bottom:4px">
           <h1 style="color:#1a56a0;font-size:20px;margin:0">🌙 Rapport de Nuit — La Poste Mulhouse</h1>
-          <p style="color:#5a6478;font-size:12px;margin:4px 0 0">🌆 Aprem ${fmtDate(dateAprem)} → ☀️ Matin ${fmtDate(dateMatin)}</p>
+          <p style="color:#5a6478;font-size:12px;margin:4px 0 0">🌆 Aprem ${fmtDate(dateAprem)} → ☀️ Matin ${fmtDate(dateMatin)}${detailJ?' · 🌤️ Journée':''}</p>
         </div>
-        ${htmlTotauxNuit(detailAprem&&detailAprem.fiche, detailMatin&&detailMatin.fiche)}
+        ${htmlTotauxNuit(detailAprem&&detailAprem.fiche, detailMatin&&detailMatin.fiche, detailJ&&detailJ.fiche)}
       </div>
       ${htmlVacation(detailAprem, 'Équipe Aprem', '🌆', fmtDate(dateAprem))}
       <div style="page-break-before:always"></div>
       ${htmlVacation(detailMatin, 'Équipe Matin', '☀️', fmtDate(dateMatin))}
+      ${detailJ?`<div style="page-break-before:always"></div>${htmlVacation(detailJ, 'Équipe Journée', '🌤️', fmtDate(dateMatin))}`:''}
     `;
 
     const overlay = document.createElement('div');
@@ -2534,8 +2559,11 @@ async function exporterRapportNuit(dateAprem, dateMatin){
 // ══════════════════════════════════════════════════════════════
 // FICHE DE VACATION (effectif, volumes, concentration) + SYNTHÈSE
 // ══════════════════════════════════════════════════════════════
-const PREVUS_DEFAUT = {aprem:20, matin:20, conc:8};
-function typeEquipe(eq){ return /Aprem|Soir/i.test(eq||'')?'aprem':(/Matin|Nuit/i.test(eq||'')?'matin':null); }
+const PREVUS_DEFAUT = {aprem:20, matin:20, journee:22, conc:8};
+// Du 23/11 au 23/12/2026 : effectifs prévus renforcés (Aprem 23, Matin 23, Journée 22)
+const PREVUS_PERIODE = {aprem:23, matin:23, journee:22};
+function prevDef(t, iso){ return (iso && journeeActive(iso) && PREVUS_PERIODE[t]!=null) ? PREVUS_PERIODE[t] : PREVUS_DEFAUT[t]; }
+function typeEquipe(eq){ return /Aprem|Soir/i.test(eq||'')?'aprem':(/Matin|Nuit/i.test(eq||'')?'matin':(/Journ/i.test(eq||'')?'journee':null)); }
 function ficheVide(){ return {absents:[], presents:'', prevus:'', interim:'', fin_tri:'', cible_tri:'', hn:'', volumes:[], conc:{presents:'', prevus:'', interim:'', liaisons:[]}, commentaire:'', passation:''}; }
 function nI(v){ const n=parseInt(v,10); return isNaN(n)?0:n; }
 function aVal(v){ return v!==''&&v!=null&&!isNaN(parseInt(v,10)); }
@@ -2551,11 +2579,11 @@ function normFiche(r){
   f.commentaire = r.commentaire||''; f.passation = r.passation||'';
   return f;
 }
-function prevusEff(f, eq, conc){
+function prevusEff(f, eq, conc, iso){
   const v = conc ? (f&&f.conc&&f.conc.prevus) : (f&&f.prevus);
   if(aVal(v)) return nI(v);
   if(conc) return PREVUS_DEFAUT.conc;
-  const t = typeEquipe(eq); return t?PREVUS_DEFAUT[t]:null;
+  const t = typeEquipe(eq); return t?prevDef(t, iso||getToday()):null;
 }
 // Absents = noms saisis (interne) sinon déduit des présents.
 function effAbs(f, prevus, presents){
@@ -2603,10 +2631,10 @@ function calcFiche(f){
   return {lignes, sumTot, sumDisp, sumDist, hn, totalHN:sumTot+hn, liaisons, totConc};
 }
 // Totaux de la nuit : { aprem, matin } = résultats de calcFiche (ou null)
-function totauxNuit(fa, fm){
-  const a = calcFiche(fa), m = calcFiche(fm);
-  const sans = {disp:a.sumDisp+m.sumDisp, dist:a.sumDist+m.sumDist, hn:a.hn+m.hn, total:a.totalHN+m.totalHN};
-  return {a, m, sans, conc:a.totConc, avec: sans.total + a.totConc};
+function totauxNuit(fa, fm, fj){
+  const a = calcFiche(fa), m = calcFiche(fm), j = calcFiche(fj||null);
+  const sans = {disp:a.sumDisp+m.sumDisp+j.sumDisp, dist:a.sumDist+m.sumDist+j.sumDist, hn:a.hn+m.hn+j.hn, total:a.totalHN+m.totalHN+j.totalHN};
+  return {a, m, j, sans, conc:a.totConc, avec: sans.total + a.totConc};
 }
 async function chargerFiche(){
   S.ficheIndispo = false; chargerNomsAbsents().then(()=>{ if(S.fiche) render(); });
@@ -2615,7 +2643,7 @@ async function chargerFiche(){
     const r = await db.get('fiches_vacation',`vacation_id=eq.${S.vacationId}`);
     S.fiche = normFiche(r[0]);
     const t = typeEquipe(S.agent&&S.agent.equipe);
-    if(!aVal(S.fiche.prevus) && t) S.fiche.prevus = PREVUS_DEFAUT[t];
+    if(!aVal(S.fiche.prevus) && t) S.fiche.prevus = prevDef(t, S.date);
     if(!aVal(S.fiche.conc.prevus)) S.fiche.conc.prevus = PREVUS_DEFAUT.conc;
   }catch(e){ console.warn('fiches_vacation indisponible', e); S.fiche = ficheVide(); S.ficheIndispo = true; }
 }
@@ -2863,14 +2891,15 @@ function htmlFiche(f, avecConc, eq){
   if(f && (f.commentaire||f.passation)) out += h('💬 Commentaire et passation') + (f.commentaire?`<p style="margin:0 0 6px"><b>Événements :</b> ${escHtml(f.commentaire)}</p>`:'') + (f.passation?`<p style="margin:0"><b>Consignes équipe suivante :</b> ${escHtml(f.passation)}</p>`:'');
   return out;
 }
-function htmlTotauxNuit(fa, fm){
-  const T = totauxNuit(fa, fm); const th='padding:6px'; const t0='padding:6px;text-align:center';
+function htmlTotauxNuit(fa, fm, fj){
+  const T = totauxNuit(fa, fm, fj); const th='padding:6px'; const t0='padding:6px;text-align:center';
   const row = (n,x,bg)=>`<tr style="border-bottom:1px solid #eee;${bg?'background:'+bg+';font-weight:bold':''}"><td style="padding:6px">${n}</td><td style="${t0}">${fmtN(x.disp)}</td><td style="${t0}">${fmtN(x.dist)}</td><td style="${t0}">${fmtN(x.hn)}</td><td style="${t0}">${fmtN(x.total)}</td></tr>`;
   return `<h3 style="color:#1a56a0;font-size:14px;margin:14px 0 8px;border-left:4px solid #1a56a0;padding-left:8px">🧮 Volumes de la nuit</h3>
   <table style="width:100%;border-collapse:collapse;font-size:12px">
     <tr style="background:#1a56a0;color:white"><th style="${th};text-align:left"></th><th style="${th}">Dispersion</th><th style="${th}">Distribution</th><th style="${th}">HN</th><th style="${th}">Total colis</th></tr>
     ${row('🌆 Équipe Aprem',{disp:T.a.sumDisp,dist:T.a.sumDist,hn:T.a.hn,total:T.a.totalHN})}
     ${row('☀️ Équipe Matin',{disp:T.m.sumDisp,dist:T.m.sumDist,hn:T.m.hn,total:T.m.totalHN})}
+    ${fj?row('🌤️ Équipe Journée',{disp:T.j.sumDisp,dist:T.j.sumDist,hn:T.j.hn,total:T.j.totalHN}):''}
     ${row('TOTAL sans Concentration',T.sans,'#dcfce7')}
     <tr style="border-bottom:1px solid #eee"><td style="padding:6px">🚚 Concentration (colis chargés)</td><td style="${t0}" colspan="3">—</td><td style="${t0}">${fmtN(T.conc)}</td></tr>
     <tr style="background:#ccfbf1;font-weight:bold"><td style="padding:6px">TOTAL avec Concentration</td><td style="${t0}" colspan="3">—</td><td style="${t0}">${fmtN(T.avec)}</td></tr>
@@ -2878,7 +2907,7 @@ function htmlTotauxNuit(fa, fm){
   <h3 style="color:#1a56a0;font-size:14px;margin:14px 0 8px;border-left:4px solid #1a56a0;padding-left:8px">👥 Effectifs présents et fin de tri</h3>
   <table style="width:100%;border-collapse:collapse;font-size:12px">
     <tr style="background:#1a56a0;color:white"><th style="${th};text-align:left"></th><th style="${th}">Présents</th><th style="${th}">Fin de tri / cible</th></tr>
-    ${[['🌆 Aprem',fa,false],['☀️ Matin',fm,false],['🚚 Concentration',fa,true]].map(([n,f,conc])=>{
+    ${[['🌆 Aprem',fa,false],['☀️ Matin',fm,false]].concat(fj?[['🌤️ Journée',fj,false]]:[]).concat([['🚚 Concentration',fa,true]]).map(([n,f,conc])=>{
       const pr = f?(conc?f.conc.presents:f.presents):'';
       const tri = (!conc&&f&&f.fin_tri)?(f.fin_tri+' / '+(f.cible_tri||'—')+(ecartTri(f.fin_tri,f.cible_tri)!=null?' ('+(ecartTri(f.fin_tri,f.cible_tri)<=0?'✅':'⏱ +'+ecartTri(f.fin_tri,f.cible_tri)+' min')+')':'')):'—';
       return `<tr style="border-bottom:1px solid #eee"><td style="padding:6px">${n}</td><td style="${t0}">${aVal(pr)?nI(pr):'—'}</td><td style="${t0}">${tri}</td></tr>`; }).join('')}
@@ -2891,7 +2920,7 @@ function htmlTotauxNuit(fa, fm){
 // ══════════════════════════════════════════════════════════════
 function serialDate(iso){ const p=iso.split('-').map(Number); return Math.round((Date.UTC(p[0],p[1]-1,p[2])-Date.UTC(1899,11,30))/86400000); }
 function lundiIso(iso){ return isoLocal(lundiDe(new Date(iso+'T12:00:00'))); }
-function equipeKpi(eq){ const t=typeEquipe(eq); return t==='aprem'?'Aprem':(t==='matin'?'Matin':(eq||'Autre')); }
+function equipeKpi(eq){ const t=typeEquipe(eq); return t==='aprem'?'Aprem':(t==='matin'?'Matin':(t==='journee'?'Journée':(eq||'Autre'))); }
 
 function preparerKPI(raw){
   const P = {vac:[], vol:[], conc:[], rel:[], ano:[], epi:[], kpi:[]};
@@ -2909,7 +2938,7 @@ function preparerKPI(raw){
   Object.values(best).sort((a,b)=> a.v.date<b.v.date?-1:(a.v.date>b.v.date?1:0)).forEach(x=>{
     const v = x.v, eq = equipeKpi(v.equipe), lun = lundiMetier(v.date, v.equipe), f = x.f, c = calcFiche(f);
     const ag = raw.agents.find(a=>String(a.id)===String(v.agent_id)); const chef = ag?(ag.prenom+' '+ag.nom):'';
-    const prev = f ? prevusEff(f, v.equipe, false) : prevusEff(null, v.equipe, false);
+    const prev = f ? prevusEff(f, v.equipe, false, v.date) : prevusEff(null, v.equipe, false, v.date);
     const ecart = f ? ecartTri(f.fin_tri, f.cible_tri) : null;
     const rel = x.colis.filter(c2=>c2.quantite_colis);
     const sess = {}; x.colis.forEach(c2=>{ const s=c2.session_numero||1; sess[s]=Math.max(sess[s]||0, c2.arret_machine_cumul||0); });
@@ -3012,7 +3041,7 @@ function construireClasseurKPI(P, from, to){
     XLSX.utils.book_append_sheet(wb, feuille(H, rows), 'KPI_FinTri'); }
   // Volumes
   { const H=['Semaine (lundi)','Dispersion','Distribution','HN','Total sans Concentration','Colis chargés Concentration','Total avec Concentration','Total Aprem','Total Matin'];
-    const rows = lundis.map((l,i)=>{ const r=i+2; const two=c=>`${sumifs(c,r,'Aprem')}+${sumifs(c,r,'Matin')}`;
+    const rows = lundis.map((l,i)=>{ const r=i+2; const two=c=>`${sumifs(c,r,'Aprem')}+${sumifs(c,r,'Matin')}+${sumifs(c,r,'Journée')}`;
       return [{d:l},{f:two('K')},{f:two('L')},{f:two('M')},{f:two('N')},{f:sumifs('O',r,'Concentration')},{f:`E${r}+F${r}`},{f:sumifs('N',r,'Aprem')},{f:sumifs('N',r,'Matin')}]; });
     const n = lundis.length+1; rows.push(['TOTAL',...[1,2,3,4,5,6,7,8].map(c=>({f:`SUM(${col(c)}2:${col(c)}${n})`}))]);
     XLSX.utils.book_append_sheet(wb, feuille(H, rows), 'KPI_Volumes'); }
@@ -3129,25 +3158,29 @@ const _pres=(r,e)=>_avg(_eq(r,e).filter(x=>x.presents!=null).map(x=>x.presents))
 const _ponct=(r,e)=>{ const q=_eq(r,e).filter(x=>x.ecart_fin!=null); return q.length?q.filter(x=>x.ecart_fin<=0).length/q.length*100:null; };
 const _ecart=(r,e)=>_avg(_eq(r,e).filter(x=>x.ecart_fin!=null).map(x=>x.ecart_fin));
 const _cad=(r,e)=>_avg(_eq(r,e).filter(x=>x.cadence!=null).map(x=>x.cadence));
-const _sans=r=>_sum(_eq(r,'Aprem'),'total_colis')+_sum(_eq(r,'Matin'),'total_colis');
+const _sans=r=>_sum(_eq(r,'Aprem'),'total_colis')+_sum(_eq(r,'Matin'),'total_colis')+_sum(_eq(r,'Journée'),'total_colis');
 const INDIC = [
   {id:'abs_aprem',g:'👥 Effectifs',l:'Absentéisme Aprem',u:'%',pol:-1,f:r=>_abs(r,'Aprem')},
   {id:'abs_matin',g:'👥 Effectifs',l:'Absentéisme Matin',u:'%',pol:-1,f:r=>_abs(r,'Matin')},
+  {id:'abs_jour',opt:1,g:'👥 Effectifs',l:'Absentéisme Journée',u:'%',pol:-1,f:r=>_abs(r,'Journée')},
   {id:'abs_conc',g:'👥 Effectifs',l:'Absentéisme Concentration',u:'%',pol:-1,f:r=>_abs(r,'Concentration')},
   {id:'pres_aprem',g:'👥 Effectifs',l:'Présents Aprem (moy./vacation)',u:'',pol:1,f:r=>_pres(r,'Aprem')},
   {id:'pres_matin',g:'👥 Effectifs',l:'Présents Matin (moy./vacation)',u:'',pol:1,f:r=>_pres(r,'Matin')},
+  {id:'pres_jour',opt:1,g:'👥 Effectifs',l:'Présents Journée (moy./vacation)',u:'',pol:1,f:r=>_pres(r,'Journée')},
   {id:'pres_conc',g:'👥 Effectifs',l:'Présents Concentration (moy.)',u:'',pol:1,f:r=>_pres(r,'Concentration')},
   {id:'interim',g:'👥 Effectifs',l:'Part d\'intérimaires',u:'%',pol:0,f:r=>{ const q=r.filter(x=>x.presents!=null); const p=_sum(q,'presents'); return p?_sum(q,'interimaires')/p*100:null; }},
   {id:'ponct_aprem',g:'⏱ Fin de tri',l:'Ponctualité Aprem',u:'%',pol:1,f:r=>_ponct(r,'Aprem')},
   {id:'ponct_matin',g:'⏱ Fin de tri',l:'Ponctualité Matin',u:'%',pol:1,f:r=>_ponct(r,'Matin')},
+  {id:'ponct_jour',opt:1,g:'⏱ Fin de tri',l:'Ponctualité Journée',u:'%',pol:1,f:r=>_ponct(r,'Journée')},
   {id:'ecart_aprem',g:'⏱ Fin de tri',l:'Écart moyen Aprem (min)',u:'min',pol:-1,f:r=>_ecart(r,'Aprem')},
   {id:'ecart_matin',g:'⏱ Fin de tri',l:'Écart moyen Matin (min)',u:'min',pol:-1,f:r=>_ecart(r,'Matin')},
   {id:'vol_sans',g:'📦 Volumes',l:'Total colis (hors Concentration)',u:'',pol:1,f:r=>_sans(r)},
   {id:'vol_conc',g:'📦 Volumes',l:'Colis chargés Concentration',u:'',pol:1,f:r=>_sum(_eq(r,'Concentration'),'colis_charges')},
   {id:'vol_avec',g:'📦 Volumes',l:'Total avec Concentration',u:'',pol:1,f:r=>_sans(r)+_sum(_eq(r,'Concentration'),'colis_charges')},
-  {id:'disp',g:'📦 Volumes',l:'Dispersion',u:'',pol:0,f:r=>_sum(_eq(r,'Aprem'),'dispersion')+_sum(_eq(r,'Matin'),'dispersion')},
-  {id:'dist',g:'📦 Volumes',l:'Distribution',u:'',pol:0,f:r=>_sum(_eq(r,'Aprem'),'distribution')+_sum(_eq(r,'Matin'),'distribution')},
-  {id:'hn',g:'📦 Volumes',l:'HN',u:'',pol:0,f:r=>_sum(_eq(r,'Aprem'),'hn')+_sum(_eq(r,'Matin'),'hn')},
+  {id:'disp',g:'📦 Volumes',l:'Dispersion',u:'',pol:0,f:r=>_sum(_eq(r,'Aprem'),'dispersion')+_sum(_eq(r,'Matin'),'dispersion')+_sum(_eq(r,'Journée'),'dispersion')},
+  {id:'dist',g:'📦 Volumes',l:'Distribution',u:'',pol:0,f:r=>_sum(_eq(r,'Aprem'),'distribution')+_sum(_eq(r,'Matin'),'distribution')+_sum(_eq(r,'Journée'),'distribution')},
+  {id:'hn',g:'📦 Volumes',l:'HN',u:'',pol:0,f:r=>_sum(_eq(r,'Aprem'),'hn')+_sum(_eq(r,'Matin'),'hn')+_sum(_eq(r,'Journée'),'hn')},
+  {id:'cad_jour',opt:1,g:'🚀 Cadence',l:'Colis/h moyen Journée',u:'',pol:1,f:r=>_cad(r,'Journée')},
   {id:'cad_aprem',g:'🚀 Cadence',l:'Colis/h moyen Aprem',u:'',pol:1,f:r=>_cad(r,'Aprem')},
   {id:'cad_matin',g:'🚀 Cadence',l:'Colis/h moyen Matin',u:'',pol:1,f:r=>_cad(r,'Matin')},
   {id:'sous_obj',g:'🚀 Cadence',l:'Relevés sous objectif',u:'%',pol:-1,f:r=>{ const p=_sum(r,'releves'); return p?_sum(r,'sous_objectif')/p*100:null; }},
@@ -3235,7 +3268,7 @@ function renderKPI(){
   const prec = addJours(sel,-7); const fmtW = w=>new Date(w+'T12:00:00').toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit'});
   const hist = [7,6,5,4,3,2,1,0].map(k=>addJours(sel,-7*k));
   let lastG = '';
-  const lignes = INDIC.map(i=>{
+  const lignes = INDIC.filter(i=>!i.opt || weeks.some(w=>H[w]&&H[w][i.id]!=null)).map(i=>{
     const cur = H[sel][i.id]; const pr = H[prec]?H[prec][i.id]:null;
     const quatre = [0,1,2,3].map(k=>H[addJours(sel,-7*k)]?H[addJours(sel,-7*k)][i.id]:null).filter(x=>x!=null);
     const moy4 = _avg(quatre);
@@ -3375,6 +3408,7 @@ async function verifierClotureAuto(){
   // Fenêtres de clôture : sinon la vacation se fermait dès l'ouverture de l'application pendant la vacation (ex. Aprem à 17h)
   if(equipe === 'Aprem' && !fenetreSaisieOuverte('Aprem')) doitClore = true; // de 01h00 à 16h00
   if(equipe === 'Matin' && !fenetreSaisieOuverte('Matin')) doitClore = true; // à partir de 09h00
+  if(equipe === 'Journée' && !fenetreSaisieOuverte('Journée')) doitClore = true; // après 20h00
 
   if(!doitClore) return;
 
