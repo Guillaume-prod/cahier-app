@@ -108,7 +108,7 @@ const supabaseAuth = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 const TRANCHES_MATIN = ['00h00 - 01h00','01h00 - 02h00','02h00 - 03h00','03h00 - 04h00','04h00 - 05h00','05h00 - 06h00','06h00 - 07h00','07h00 - 08h00'];
 const TRANCHES_SOIREE = ['15h00 - 16h00','17h00 - 18h00','18h00 - 19h00','19h00 - 20h00','20h00 - 21h00','21h00 - 22h00','22h00 - 23h00','23h00 - 00h00','00h00 - 01h00'];
 const OBJECTIF_COLIS = 2400;
-const APP_VERSION = 'v53';
+const APP_VERSION = 'v55';
 
 // Personnel chargé dynamiquement depuis la base
 let PERSONNEL_DB = {}; // { 'Matin': [{id,prenom,nom},...], 'Aprem': [...], 'Soirée': [...] }
@@ -674,6 +674,7 @@ function render(){
     ? [['epi','🦺','EPI'],['chantiers','📋','Chantiers'],['colis','📦','Colis/h'],['anomalies','⚠️','Anomalies'],['fiche','📝','Fiche'],['pdf','📄','PDF'],['semaine','📊','Semaine'],['client','🤝','Client'],['kpi','📈','KPI'],['admin','⚙️','Admin']]
     : [['epi','🦺','EPI'],['chantiers','📋','Chantiers'],['colis','📦','Colis/h'],['anomalies','⚠️','Anomalies'],['fiche','📝','Fiche'],['pdf','📄','PDF']].concat(typeEquipe(S.agent.equipe)==='matin'?[['semaine','📊','Semaine'],['client','🤝','Client']]:[]);
   
+  let nav2 = S.correction ? nav.slice(0,6) : nav;
   let content = '';
   if(S.horsFenetre && !S.agent.est_responsable) content = renderFermee();
   else if(S.vue==='epi') content = renderEPI();
@@ -702,14 +703,15 @@ function render(){
         <div style="font-size:12px;color:var(--texte-doux)">${fmtDate(S.date).split(' ').slice(0,2).join(' ')} · ${APP_VERSION}</div>
         <div style="display:flex;gap:8px">
         ${!S.agent.est_responsable?`<button onclick="setVue('code')" style="font-size:11px;color:var(--bleu);background:none;border:none;cursor:pointer;padding:0">🔑 Code</button>`:''}
-        <button onclick="finVacation()" style="font-size:11px;color:var(--orange);background:none;border:none;cursor:pointer;padding:0">🏁 Fin</button>
+        ${S.correction?`<button onclick="quitterCorrection()" style="font-size:11px;color:var(--orange);background:none;border:none;cursor:pointer;padding:0;font-weight:700">↩️ Terminer la correction</button>`:`<button onclick="finVacation()" style="font-size:11px;color:var(--orange);background:none;border:none;cursor:pointer;padding:0">🏁 Fin</button>`}
         <button onclick="deconnexion()" style="font-size:11px;color:var(--rouge);background:none;border:none;cursor:pointer;padding:0">Déconnexion</button>
       </div>
       </div>
     </div>
+    ${S.correction?`<div style="background:#fef3c7;border:2px solid #d97706;border-radius:10px;padding:10px 12px;margin-bottom:12px;font-size:12px;color:#92400e"><strong>✏️ Correction d'une saisie passée</strong> — ${fmtDate(S.correction.date)} · équipe ${escHtml(S.correction.equipe||'')}.<br>Vos modifications remplacent les saisies d'origine. Appuyez sur « Terminer la correction » quand vous avez fini.</div>`:''}
     ${content}
     <nav class="bottom-nav">
-      ${nav.map(([v,i,l])=>`<button class="nav-item ${S.vue===v?'active':''}" onclick="setVue('${v}')"><span>${i}</span>${l}</button>`).join('')}
+      ${nav2.map(([v,i,l])=>`<button class="nav-item ${S.vue===v?'active':''}" onclick="setVue('${v}')"><span>${i}</span>${l}</button>`).join('')}
     </nav>`;
 }
 
@@ -1068,6 +1070,7 @@ function renderAdmin(){
     <div class="card-title">🦺 EPI du jour</div>
     ${renderAdminEPI()}
   </div>
+  ${renderCorrectionAdmin()}
   <div class="card">
     <div class="card-title">📁 Archives — Vacations terminées</div>
     <div class="form-group">
@@ -1414,6 +1417,72 @@ async function finVacation(){
   render();
 }
 
+
+// ── CORRECTION DE SAISIES PASSÉES (administrateur uniquement) ──
+function renderCorrectionAdmin(){
+  const d = S.corrDate || getToday();
+  const nom = id => { const a=(S.tousAgents||[]).find(x=>String(x.id)===String(id)); return a?a.prenom+' '+a.nom:'—'; };
+  const hh = c => { if(!c) return ''; try{ return new Date(c.endsWith('Z')?c:c+'Z').toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}); }catch(e){ return ''; } };
+  const liste = S.corrListe;
+  return `<div class="card">
+    <div class="card-title">✏️ Corriger une saisie passée</div>
+    <div class="form-group">
+      <label class="form-label">Date de la vacation</label>
+      <input class="form-input" type="date" value="${d}" onchange="chercherVacsCorrection(this.value)" />
+    </div>
+    ${liste===undefined || liste===null ? `<button class="btn-primary" onclick="chercherVacsCorrection('${d}')">🔍 Rechercher les vacations de cette date</button>`
+      : (liste.length ? liste.map(it=>`<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--gris)">
+          <div><div style="font-weight:700;font-size:13px">${escHtml(it.v.equipe||'—')} · ${escHtml(nom(it.v.agent_id))}</div>
+          <div style="font-size:11px;color:var(--texte-doux)">créée à ${hh(it.v.created_at)} · ${it.n?it.n+' saisie(s)':'vide'}${it.v.terminee?' · terminée':''}</div></div>
+          <button onclick="entrerCorrection('${it.v.id}')" style="padding:6px 12px;background:var(--bleu-clair);color:var(--bleu);border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">✏️ Modifier</button></div>`).join('')
+        : '<div class="empty-state" style="padding:12px;color:var(--texte-doux)">Aucune vacation à cette date.</div>')}
+    ${liste ? `<div style="font-size:12px;color:var(--texte-doux);margin:12px 0 6px">Pas de vacation pour une équipe ce jour-là ? Créez-en une vide, puis modifiez-la :</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">${['Aprem','Matin','Journée'].map(e=>`<button onclick="creerVacCorrection('${e}')" style="padding:6px 10px;background:#f4f6f9;border:1.5px solid var(--gris-bord);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">➕ ${e}</button>`).join('')}</div>`:''}
+  </div>`;
+}
+async function chercherVacsCorrection(date){
+  if(!date) return;
+  S.corrDate = date; S.corrListe = null; render();
+  try{
+    const vacs = await db.get('vacations_suivi',`date=eq.${date}&select=*&order=created_at.asc`);
+    S.corrListe = await Promise.all(vacs.map(async v=>{
+      const [fi,an,co,ct,ep] = await Promise.all([
+        chargerFicheDe(v.id).catch(()=>null),
+        db.get('anomalies',`vacation_id=eq.${v.id}&select=id`).catch(()=>[]),
+        db.get('controles_colis',`vacation_id=eq.${v.id}&select=id`).catch(()=>[]),
+        db.get('controles_chantiers',`vacation_id=eq.${v.id}&select=id`).catch(()=>[]),
+        db.get('epi',`vacation_id=eq.${v.id}&select=id`).catch(()=>[]) ]);
+      const nf = fi ? (fi.volumes.length + (aVal(fi.presents)?1:0)) : 0;
+      return {v, n: nf+an.length+co.length+ct.length+ep.length};
+    }));
+  }catch(e){ S.corrListe = []; toast('Erreur de recherche','err'); }
+  render();
+}
+async function creerVacCorrection(equipe){
+  try{
+    await db.post('vacations_suivi',{agent_id:S.agent.id, equipe, date:S.corrDate||getToday(), terminee:true});
+    await chercherVacsCorrection(S.corrDate||getToday());
+  }catch(e){ toast('Erreur de création','err'); }
+}
+async function entrerCorrection(id){
+  const it = (S.corrListe||[]).find(x=>String(x.v.id)===String(id)); if(!it) return;
+  const v = it.v;
+  try{ arreterRappelColis(); }catch(e){}
+  S.agentReel = S.agent; S.modeTestAvant = S.modeTest; S.modeTest = true; // heures saisies à la main
+  S.agent = {...S.agentReel, equipe: v.equipe};
+  S.correction = {vacId: v.id, date: v.date, equipe: v.equipe};
+  S.date = v.date; S.vue = 'fiche'; S.loading = true; render();
+  await chargerTout(); S.loading = false; render();
+}
+async function quitterCorrection(){
+  try{ if(_ficheTimer) await sauverFiche(); }catch(e){}
+  try{ await syncKPIVacationCourante(); }catch(e){}
+  S.agent = S.agentReel; S.modeTest = S.modeTestAvant; S.correction = null; S.agentReel = null;
+  S.date = getToday(); S.vue = 'admin'; S.corrListe = null; S.loading = true; render();
+  await chargerTout(); S.loading = false; render();
+  toast('✅ Correction enregistrée','ok');
+}
+
 async function setVue(v){
   if(!S.epiValide && v!=='epi' && v!=='code' && !S.agent.est_responsable){ toast("Valide d'abord les EPI avant de continuer",'err'); return; }
   S.vue = v; render();
@@ -1485,6 +1554,7 @@ async function actualiserFenetre(){
 }
 
 async function getOrCreateVacation(){
+  if(S.correction){ S.vacationId = S.correction.vacId; S.horsFenetre = false; S.vacTerminee = false; return; }
   const equipe = S.agent.equipe || 'Toutes';
   // Chercher sur les 2 derniers jours pour gérer le passage minuit (équipe d'aprem)
   const hier = new Date(Date.now() - 36*60*60*1000);
@@ -2562,7 +2632,12 @@ async function exporterRapportNuit(dateAprem, dateMatin){
 const PREVUS_DEFAUT = {aprem:20, matin:20, journee:22, conc:8};
 // Du 23/11 au 23/12/2026 : effectifs prévus renforcés (Aprem 23, Matin 23, Journée 22)
 const PREVUS_PERIODE = {aprem:23, matin:23, journee:22};
-function prevDef(t, iso){ return (iso && journeeActive(iso) && PREVUS_PERIODE[t]!=null) ? PREVUS_PERIODE[t] : PREVUS_DEFAUT[t]; }
+// À partir du 03/11/2026, hors période : Aprem à 18 le lundi et le samedi (les autres jours : 20)
+function prevDef(t, iso){
+  if(iso && journeeActive(iso) && PREVUS_PERIODE[t]!=null) return PREVUS_PERIODE[t];
+  if(t==='aprem' && iso && iso>='2026-11-03'){ const j=jourSemaine(iso); if(j===1||j===6) return 18; }
+  return PREVUS_DEFAUT[t];
+}
 function typeEquipe(eq){ return /Aprem|Soir/i.test(eq||'')?'aprem':(/Matin|Nuit/i.test(eq||'')?'matin':(/Journ/i.test(eq||'')?'journee':null)); }
 function ficheVide(){ return {absents:[], presents:'', prevus:'', interim:'', fin_tri:'', cible_tri:'', hn:'', volumes:[], conc:{presents:'', prevus:'', interim:'', liaisons:[]}, commentaire:'', passation:''}; }
 function nI(v){ const n=parseInt(v,10); return isNaN(n)?0:n; }
@@ -3384,6 +3459,7 @@ function demarrerClotureAuto(){
 }
 
 async function verifierClotureAuto(){
+  if(S.correction) return; // correction d'une saisie passée : aucune clôture automatique
   // Le créneau de saisie vient de s'ouvrir : on charge la vacation
   if(S.agent && S.vacTerminee && S.lockUntil && Date.now() < S.lockUntil) return;
   if(S.agent && S.horsFenetre && fenetreSaisieOuverte(S.agent.equipe)){
