@@ -44,8 +44,9 @@ select.form-input{cursor:pointer;}
 .btn-add{padding:8px 14px;background:var(--bleu-clair);color:var(--bleu);border:1.5px solid var(--bleu);border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;margin-top:8px;}
 
 /* NAV */
-.bottom-nav{position:fixed;bottom:0;left:0;right:0;background:white;border-top:1px solid var(--gris-bord);display:flex;z-index:100;}
-.nav-item{flex:1;display:flex;flex-direction:column;align-items:center;padding:10px 4px 12px;cursor:pointer;font-size:10px;font-weight:600;color:var(--texte-doux);border:none;background:none;}
+.bottom-nav{position:fixed;bottom:0;left:0;right:0;background:white;border-top:1px solid var(--gris-bord);display:flex;z-index:100;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;}
+.bottom-nav::-webkit-scrollbar{display:none;}
+.nav-item{flex:1 0 auto;min-width:62px;display:flex;flex-direction:column;align-items:center;padding:10px 4px 12px;cursor:pointer;font-size:10px;font-weight:600;color:var(--texte-doux);border:none;background:none;}
 .nav-item.active{color:var(--bleu);}
 .nav-item span{font-size:22px;margin-bottom:2px;}
 
@@ -108,7 +109,7 @@ const supabaseAuth = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 const TRANCHES_MATIN = ['00h00 - 01h00','01h00 - 02h00','02h00 - 03h00','03h00 - 04h00','04h00 - 05h00','05h00 - 06h00','06h00 - 07h00','07h00 - 08h00'];
 const TRANCHES_SOIREE = ['15h00 - 16h00','17h00 - 18h00','18h00 - 19h00','19h00 - 20h00','20h00 - 21h00','21h00 - 22h00','22h00 - 23h00','23h00 - 00h00','00h00 - 01h00'];
 const OBJECTIF_COLIS = 2400;
-const APP_VERSION = 'v55';
+const APP_VERSION = 'v56';
 
 // Personnel chargé dynamiquement depuis la base
 let PERSONNEL_DB = {}; // { 'Matin': [{id,prenom,nom},...], 'Aprem': [...], 'Soirée': [...] }
@@ -693,6 +694,7 @@ function render(){
   else if(S.vue==='client') content = renderClient();
   else if(S.vue==='admin') content = renderAdmin();
   
+  const _navOld = document.querySelector('.bottom-nav'); const _navScroll = _navOld ? _navOld.scrollLeft : 0;
   app.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;padding-top:8px">
       <div>
@@ -713,6 +715,7 @@ function render(){
     <nav class="bottom-nav">
       ${nav2.map(([v,i,l])=>`<button class="nav-item ${S.vue===v?'active':''}" onclick="setVue('${v}')"><span>${i}</span>${l}</button>`).join('')}
     </nav>`;
+  { const nv = document.querySelector('.bottom-nav'); if(nv){ nv.scrollLeft = _navScroll; const ac = nv.querySelector('.nav-item.active'); if(ac && (ac.offsetLeft < nv.scrollLeft || ac.offsetLeft+ac.offsetWidth > nv.scrollLeft+nv.clientWidth)) nv.scrollLeft = ac.offsetLeft - 20; } }
 }
 
 function renderLogin(){
