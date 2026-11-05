@@ -109,7 +109,7 @@ const supabaseAuth = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 const TRANCHES_MATIN = ['00h00 - 01h00','01h00 - 02h00','02h00 - 03h00','03h00 - 04h00','04h00 - 05h00','05h00 - 06h00','06h00 - 07h00','07h00 - 08h00'];
 const TRANCHES_SOIREE = ['15h00 - 16h00','17h00 - 18h00','18h00 - 19h00','19h00 - 20h00','20h00 - 21h00','21h00 - 22h00','22h00 - 23h00','23h00 - 00h00','00h00 - 01h00'];
 const OBJECTIF_COLIS = 2400;
-const APP_VERSION = 'v56';
+const APP_VERSION = 'v57';
 
 // Personnel chargé dynamiquement depuis la base
 let PERSONNEL_DB = {}; // { 'Matin': [{id,prenom,nom},...], 'Aprem': [...], 'Soirée': [...] }
@@ -3029,7 +3029,8 @@ function preparerKPI(raw){
     const anoN = code => x.anos.filter(a=>(a.type_anomalie||'AUTRE')===code).length;
     const tNom = x.anos.filter(a=>!['ERA','PU','SP','MEP','FACTEO'].includes(a.type_anomalie||'AUTRE')).length;
     const ea = hasPres&&prev!=null?effAbs(f, prev, f.presents):null;
-    P.kpi.push({cle:v.date+'|'+eq, date:v.date, lundi:lun, equipe:eq,
+    const lignesTxt = c.lignes.filter(l=>aVal(l.total)).map(l=>[l.debut||'', l.fin||'', l.dispC==null?'':l.dispC, l.distrib==null?'':l.distrib].join(';')).join('|');
+    P.kpi.push({cle:v.date+'|'+eq, date:v.date, lundi:lun, equipe:eq, lignes: lignesTxt||null, conc_lignes:null,
       absents: ea?ea.absN:null, base_eff: ea?ea.base:null,
       prevus: hasPres&&prev!=null?prev:null, presents: hasPres?nI(f.presents):null, interimaires: f&&aVal(f.interim)?nI(f.interim):null,
       cible_tri: f&&f.cible_tri?f.cible_tri:null, fin_tri: f&&f.fin_tri?f.fin_tri:null, ecart_fin: ecart==null?null:ecart,
@@ -3039,7 +3040,8 @@ function preparerKPI(raw){
       arret_min: Object.values(sess).reduce((a,b)=>a+b,0), anomalies:x.anos.length, ano_era:anoN('ERA'), ano_pu:anoN('PU'), ano_sp:anoN('SP'), ano_mep:anoN('MEP'), ano_facteo:anoN('FACTEO'), ano_autre:tNom,
       epi: x.epis.filter(e=>e.nom_prenom&&e.nom_prenom!=='RAS').length, tournees:trnRes.length, tournees_nok:trnRes.filter(t=>t.resultat!=='OK').length});
     if(f && /^aprem$/i.test(eq) && (aVal(f.conc.presents) || c.liaisons.length)){
-      P.kpi.push({cle:v.date+'|Concentration', date:v.date, lundi:lun, equipe:'Concentration',
+      P.kpi.push({cle:v.date+'|Concentration', date:v.date, lundi:lun, equipe:'Concentration', lignes:null,
+        conc_lignes: (c.liaisons||[]).reduce((a,li)=>a.concat(li.camions||[]),[]).filter(cm=>aVal(cm.colis)).map(cm=>[cm.debut||'', cm.fin||'', nI(cm.colis)].join(';')).join('|')||null,
         prevus: aVal(f.conc.presents)?(aVal(f.conc.prevus)?nI(f.conc.prevus):PREVUS_DEFAUT.conc):null, presents: aVal(f.conc.presents)?nI(f.conc.presents):null, interimaires: aVal(f.conc.interim)?nI(f.conc.interim):null,
         cible_tri:null, fin_tri:null, ecart_fin:null, dispersion:null, distribution:null, hn:null, total_colis:null, colis_charges:c.totConc, cadence:null, releves:0, sous_objectif:0, arret_min:0,
         anomalies:0, ano_era:0, ano_pu:0, ano_sp:0, ano_mep:0, ano_facteo:0, ano_autre:0, epi:0, tournees:0, tournees_nok:0,
