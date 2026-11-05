@@ -109,7 +109,7 @@ const supabaseAuth = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 const TRANCHES_MATIN = ['00h00 - 01h00','01h00 - 02h00','02h00 - 03h00','03h00 - 04h00','04h00 - 05h00','05h00 - 06h00','06h00 - 07h00','07h00 - 08h00'];
 const TRANCHES_SOIREE = ['15h00 - 16h00','17h00 - 18h00','18h00 - 19h00','19h00 - 20h00','20h00 - 21h00','21h00 - 22h00','22h00 - 23h00','23h00 - 00h00','00h00 - 01h00'];
 const OBJECTIF_COLIS = 2400;
-const APP_VERSION = 'v60';
+const APP_VERSION = 'v61';
 
 // Personnel chargé dynamiquement depuis la base
 let PERSONNEL_DB = {}; // { 'Matin': [{id,prenom,nom},...], 'Aprem': [...], 'Soirée': [...] }
@@ -3252,7 +3252,7 @@ async function majKPIPeriode(from, to){
   const ids = vacs.map(v=>v.id); if(!ids.length) return 0;
   const raw = {vacs, colis:[], anos:[], epis:[], ctrls:[], tourn:[], fiches:[], agents:[]};
   raw.colis = await getParLots('controles_colis','vacation_id',ids,'&select=vacation_id,session_numero,ligne_numero,heure_controle,quantite_colis,cadence_ok,raison_non_atteinte,arret_machine_cumul');
-  raw.anos = await getParLots('anomalies','vacation_id',ids,'&select=vacation_id,type_anomalie');
+  raw.anos = await getParLots('anomalies','vacation_id',ids,'&select=vacation_id,type_anomalie,brin_mep,description');
   raw.epis = await getParLots('epi','vacation_id',ids,'&select=vacation_id,nom_prenom,epi_manquant,solution');
   raw.ctrls = await getParLots('controles_chantiers','vacation_id',ids,'&select=id,vacation_id');
   if(raw.ctrls.length) raw.tourn = await getParLots('tournees','controle_id',raw.ctrls.map(c=>c.id),'&select=controle_id,resultat');
