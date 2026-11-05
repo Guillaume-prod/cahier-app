@@ -109,7 +109,7 @@ const supabaseAuth = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 const TRANCHES_MATIN = ['00h00 - 01h00','01h00 - 02h00','02h00 - 03h00','03h00 - 04h00','04h00 - 05h00','05h00 - 06h00','06h00 - 07h00','07h00 - 08h00'];
 const TRANCHES_SOIREE = ['15h00 - 16h00','17h00 - 18h00','18h00 - 19h00','19h00 - 20h00','20h00 - 21h00','21h00 - 22h00','22h00 - 23h00','23h00 - 00h00','00h00 - 01h00'];
 const OBJECTIF_COLIS = 2400;
-const APP_VERSION = 'v57';
+const APP_VERSION = 'v60';
 
 // Personnel chargé dynamiquement depuis la base
 let PERSONNEL_DB = {}; // { 'Matin': [{id,prenom,nom},...], 'Aprem': [...], 'Soirée': [...] }
@@ -1376,9 +1376,9 @@ async function changerCode(){
   }catch(e){ toast('Erreur','err'); }
 }
 
-// ── Déconnexion automatique : Matin à 09h00, Aprem à 01h00 (chefs d'équipe uniquement) ──
-function heureCoupure(ag){ if(!ag||ag.est_responsable) return null; const t=typeEquipe(ag.equipe); return t==='matin'?9:(t==='aprem'?1:(t==='journee'?20:null)); }
-function prochaineCoupure(tsMs, h){ const d=new Date(tsMs); d.setHours(h,0,0,0); if(d.getTime()<=tsMs) d.setDate(d.getDate()+1); return d.getTime(); }
+// ── Déconnexion automatique : Matin à 09h00, Aprem à 01h30 (chefs d'équipe uniquement) ──
+function heureCoupure(ag){ if(!ag||ag.est_responsable) return null; const t=typeEquipe(ag.equipe); return t==='matin'?9:(t==='aprem'?1.5:(t==='journee'?20:null)); }
+function prochaineCoupure(tsMs, h){ const d=new Date(tsMs); d.setHours(Math.floor(h),Math.round((h%1)*60),0,0); if(d.getTime()<=tsMs) d.setDate(d.getDate()+1); return d.getTime(); }
 async function verifierDeconnexionAuto(){
   if(!S.agent) return; const h = heureCoupure(S.agent); if(h==null) return;
   let ts = 0; try{ ts = parseInt(localStorage.getItem('cahier_login_ts')||'0',10); }catch(e){}
@@ -1522,16 +1522,16 @@ async function chargerAgentsPersonnel(){
 }
 
 // ── FENÊTRES DE SAISIE ─────────────────────────────────────────
-// Aprem : de 16h00 à 01h00 ; Matin : de 00h00 à 09h00 ; autres équipes et responsable : toujours ouvert
+// Aprem : de 16h00 à 01h30 ; Matin : de 00h00 à 09h00 ; autres équipes et responsable : toujours ouvert
 function minutesNow(){ const n=new Date(); return n.getHours()*60+n.getMinutes(); }
 function fenetreSaisieOuverte(equipe){
   const t = minutesNow();
-  if(equipe==='Aprem') return t>=960 || t<60;
+  if(equipe==='Aprem') return t>=960 || t<90;
   if(equipe==='Matin') return t<540;
   if(equipe==='Journée') return journeeTravaille(isoLocal(new Date())) && t>=600 && t<1200;
   return true;
 }
-function libelleFenetre(equipe){ return equipe==='Aprem' ? '16h00 à 01h00' : equipe==='Matin' ? '00h00 à 09h00' : equipe==='Journée' ? '10h00 à 20h00, du mardi au samedi (23/11 au 23/12/2026)' : ''; }
+function libelleFenetre(equipe){ return equipe==='Aprem' ? '16h00 à 01h30' : equipe==='Matin' ? '00h00 à 09h00' : equipe==='Journée' ? '10h00 à 20h00, du mardi au samedi (23/11 au 23/12/2026)' : ''; }
 // Après « Fin » : plus d'accès jusqu'au prochain créneau (Matin : 00h00 ; Aprem : 16h00) — chefs d'équipe uniquement
 function debutCreneau(equipe){ const n=new Date(), ws=new Date(n); if(equipe==='Journée'){ ws.setHours(10,0,0,0); } else if(equipe==='Matin'){ ws.setHours(0,0,0,0); } else { if(n.getHours()<1) ws.setDate(ws.getDate()-1); ws.setHours(16,0,0,0); } return ws.getTime(); }
 function prochainCreneau(equipe){ const n=new Date(), d=new Date(n); if(equipe==='Journée'){ d.setDate(d.getDate()+1); d.setHours(10,0,0,0); } else if(equipe==='Matin'){ d.setDate(d.getDate()+1); d.setHours(0,0,0,0); } else { d.setHours(16,0,0,0); if(d.getTime()<=n.getTime()) d.setDate(d.getDate()+1); } return d.getTime(); }
@@ -1738,11 +1738,13 @@ function renderEPIBlocage(){
 
 // ── ANOMALIES ───────────────────────────────────────────────────
 const TYPES_ANOMALIE = [
+  { code:'RAQ',  label:'Reste à quai',                      couleur:'#b91c1c', bg:'#fee2e2' },
   { code:'ERA',  label:'ERA — Erreur Acheminement Machine', couleur:'#dc2626', bg:'#fee2e2' },
   { code:'PU',   label:'P.U — Pick-Up',                    couleur:'#d97706', bg:'#fef3c7' },
   { code:'SP',   label:'So Poste',                        couleur:'#7c3aed', bg:'#ede9fe' },
   { code:'MEP',  label:'Mise en Place',                    couleur:'#059669', bg:'#d1fae5' },
   { code:'FACTEO',label:'Facteo (IMEI)',                  couleur:'#0891b2', bg:'#cffafe' },
+  { code:'SEC',  label:'Sécurité',                         couleur:'#be185d', bg:'#fce7f3' },
   { code:'AUTRE',label:'Autre',                            couleur:'#1a56a0', bg:'#e8f0fb' },
 ];
 
@@ -1869,6 +1871,15 @@ async function supprimerPhotoAnomalie(id, champ){
   }catch(e){ toast('Erreur suppression photo','err'); }
 }
 const CHAMPS_PHOTO = ['photo_base64','photo2_base64','photo3_base64'];
+function texteRetard(li){ if(!li||!li.retard) return '—'; return 'Retard '+(li.retard==='avec'?'AVEC':'SANS')+' impact sur traitement'+((li.retard_tps||'').trim()?' – '+li.retard_tps.trim():''); }
+// « Reste à quai » toujours en premier dans les listes et bandeau en tête des comptes rendus
+function ordreAno(l){ return (l||[]).map((a,i)=>[a,i]).sort((x,y)=>((x[0].type_anomalie==='RAQ'?0:1)-(y[0].type_anomalie==='RAQ'?0:1))||(x[1]-y[1])).map(x=>x[0]); }
+function htmlBandeauRAQ(items){
+  if(!items||!items.length) return '';
+  return `<div style="background:#fee2e2;border:2px solid #b91c1c;border-radius:8px;padding:10px 12px;margin:10px 0;page-break-inside:avoid">
+    <div style="font-weight:800;color:#b91c1c;font-size:14px">🚨 RESTE À QUAI (${items.length})</div>
+    <ul style="margin:6px 0 0 18px;padding:0;font-size:12px;line-height:1.5">${items.map(it=>`<li><b>${escHtml(it.eq)}</b> — ${escHtml((it.a.description||'').trim()||'—')}${(it.a.brin_mep||'').trim()?' ('+escHtml(it.a.brin_mep.trim())+')':''}</li>`).join('')}</ul></div>`;
+}
 function precisionAno(a){ const v=(a.brin_mep||'').trim(); if(!v) return '—'; return a.type_anomalie==='FACTEO' ? 'IMEI …'+v : v; }
 function photosDe(a){ return CHAMPS_PHOTO.filter(c=>a[c]).map(c=>a[c]); }
 function htmlPhotos(a, mw, mh){
@@ -2001,6 +2012,7 @@ async function genererCRClientNuit(){
     const contenu = `<div style="font-family:Arial,sans-serif;padding:20px;max-width:800px;margin:0 auto;font-size:12px">
       <h1 style="color:#1a56a0;border-bottom:3px solid #1a56a0;padding-bottom:8px;font-size:18px">Compte rendu de la nuit — La Poste Mulhouse</h1>
       <p><strong>Aprem du</strong> ${fmtJ(dAprem)} <strong>— Matin du</strong> ${fmtJ(dMatin)}</p>
+      ${htmlBandeauRAQ(anos.filter(x=>x.type_anomalie==='RAQ').map(x=>({eq:x._eq==='aprem'?'Aprem':(x._eq==='journee'?'Journée':'Matin'),a:x})))}
       <h3 style="color:#1a56a0;font-size:14px;margin:14px 0 8px;border-left:4px solid #1a56a0;padding-left:8px">📦 Colis</h3>
       <table style="width:100%;border-collapse:collapse;font-size:12px">
         <tr style="background:#1a56a0;color:white"><th style="${th};text-align:left"></th><th style="${th}">Dispersion</th><th style="${th}">Distribution</th><th style="${th}">HN</th><th style="${th}">Total colis</th></tr>
@@ -2017,10 +2029,11 @@ async function genererCRClientNuit(){
         <tr style="border-bottom:1px solid #eee"><td style="padding:6px">☀️ Matin</td><td style="${t0}">${pres(fm,false)}</td></tr>
         ${j?`<tr style="border-bottom:1px solid #eee"><td style="padding:6px">🌤️ Journée</td><td style="${t0}">${pres(fj,false)}</td></tr>`:''}
         <tr style="border-bottom:1px solid #eee"><td style="padding:6px">🚚 Concentration</td><td style="${t0}">${pres(fa,true)}</td></tr></table>
+      ${(()=>{ const lr=[].concat(...((fa&&fa.conc&&fa.conc.liaisons)||[]).map((li,i)=>(li.camions||[]).map((cm,k)=>({li:cm,t:'Liaison '+(i+1)+' — camion '+(k+1)}))), ...[['Aprem',fa],['Matin',fm],['Journée',fj]].map(([e,ff])=>calcFiche(ff||null).lignes.map((l,i)=>({li:l,t:e+' — '+(l.nom||'ligne '+(i+1))})))).filter(x=>x.li.retard); return lr.length?`<h3 style="color:#b91c1c;font-size:14px;margin:14px 0 8px;border-left:4px solid #b91c1c;padding-left:8px">🚚 Liaisons en retard</h3><ul style="margin:0 0 8px 18px;padding:0;font-size:12px;line-height:1.5">${lr.map(x=>`<li>${escHtml(x.t)} — ${escHtml(texteRetard(x.li))}</li>`).join('')}</ul>`:''; })()}
       <h3 style="color:#d97706;font-size:14px;margin:14px 0 8px;border-left:4px solid #d97706;padding-left:8px">⚠️ Anomalies (${anos.length})</h3>
       ${anos.length?`${htmlCompteursAno(anos,x=>x._eq,!!j)}
       <table style="width:100%;border-collapse:collapse;font-size:11px"><tr style="background:#d97706;color:white"><th style="${th};text-align:left">Équipe</th><th style="${th};text-align:left">Type</th><th style="${th};text-align:left">Précision</th><th style="${th};text-align:left">Description</th><th style="${th};text-align:left">Photos</th></tr>
-      ${anos.map(x=>{ const t=TYPES_ANOMALIE.find(z=>z.code===x.type_anomalie)||TYPES_ANOMALIE[TYPES_ANOMALIE.length-1];
+      ${ordreAno(anos).map(x=>{ const t=TYPES_ANOMALIE.find(z=>z.code===x.type_anomalie)||TYPES_ANOMALIE[TYPES_ANOMALIE.length-1];
         return `<tr style="border-bottom:1px solid #eee;vertical-align:top;page-break-inside:avoid"><td style="padding:5px 6px">${x._eq==='aprem'?'Aprem':(x._eq==='journee'?'Journée':'Matin')}</td><td style="padding:5px 6px;font-weight:700;color:${t.couleur}">${escHtml(t.label)}</td><td style="padding:5px 6px">${escHtml(precisionAno(x))}</td><td style="padding:5px 6px">${escHtml(x.description||'—')}</td><td style="padding:5px 6px">${htmlPhotos(x,100,80)}</td></tr>`; }).join('')}</table>`
       :'<p style="color:#16a34a;font-weight:bold">✅ Aucune anomalie signalée.</p>'}
     </div>`;
@@ -2307,6 +2320,7 @@ async function exporterPDF(){
   <h1 style="color:#1a56a0;border-bottom:3px solid #1a56a0;padding-bottom:8px;font-size:18px">📓 Cahier de Vacation — La Poste Mulhouse</h1>
   <p><strong>Date :</strong> ${fmtDate(S.date)} | <strong>Équipe :</strong> ${S.agent.equipe||'—'} | <strong>Saisi par :</strong> ${S.agent.prenom} ${S.agent.nom}</p>
 
+  ${htmlBandeauRAQ((S.anomalies||[]).filter(x=>x.type_anomalie==='RAQ').map(x=>({eq:S.agent.equipe||'',a:x})))}
   ${htmlSynthese({colis:S.colisData, controles:S.controles, tournees:S.tournees, epi:S.epiData, anomalies:S.anomalies, fiche:S.fiche, equipe:S.agent.equipe})}
   ${htmlFiche(S.fiche, /^(Aprem|Soir)/i.test(S.agent.equipe||''), S.agent.equipe)}
 
@@ -2345,7 +2359,7 @@ async function exporterPDF(){
   ${(S.anomalies||[]).length?`
   <table style="width:100%;border-collapse:collapse;margin-bottom:10px">
     <tr style="background:#d97706;color:white"><th style="padding:6px">Type</th><th style="padding:6px">Brin</th><th style="padding:6px">Description</th><th style="padding:6px">Photo</th></tr>
-    ${(S.anomalies||[]).map(a=>{
+    ${ordreAno(S.anomalies).map(a=>{
       const type=TYPES_ANOMALIE.find(t=>t.code===a.type_anomalie)||TYPES_ANOMALIE[TYPES_ANOMALIE.length-1];
       return `<tr style="border-bottom:1px solid #eee;vertical-align:top">
         <td style="padding:6px;font-weight:700;color:${type.couleur};white-space:nowrap">${type.label}</td>
@@ -2575,7 +2589,7 @@ async function exporterRapportNuit(dateAprem, dateMatin){
         ${(d.anomalies||[]).length?`
         <table style="width:100%;border-collapse:collapse;font-size:11px">
           <tr style="background:#d97706;color:white"><th style="padding:5px 6px">Type</th><th style="padding:5px 6px">Brin</th><th style="padding:5px 6px">Description</th><th style="padding:5px 6px">Photo</th></tr>
-          ${(d.anomalies||[]).map(a=>{
+          ${ordreAno(d.anomalies).map(a=>{
             const type=TYPES_ANOMALIE.find(t=>t.code===a.type_anomalie)||TYPES_ANOMALIE[TYPES_ANOMALIE.length-1];
             return `<tr style="border-bottom:1px solid #eee;vertical-align:top">
               <td style="padding:5px 6px;font-weight:700;color:${type.couleur};white-space:nowrap">${type.label}</td>
@@ -2594,6 +2608,7 @@ async function exporterRapportNuit(dateAprem, dateMatin){
           <h1 style="color:#1a56a0;font-size:20px;margin:0">🌙 Rapport de Nuit — La Poste Mulhouse</h1>
           <p style="color:#5a6478;font-size:12px;margin:4px 0 0">🌆 Aprem ${fmtDate(dateAprem)} → ☀️ Matin ${fmtDate(dateMatin)}${detailJ?' · 🌤️ Journée':''}</p>
         </div>
+        ${htmlBandeauRAQ([['Aprem',detailAprem],['Matin',detailMatin],['Journée',detailJ]].reduce((r,[eq,dd])=>r.concat(((dd&&dd.anomalies)||[]).filter(x=>x.type_anomalie==='RAQ').map(x=>({eq,a:x}))),[]))}
         ${htmlTotauxNuit(detailAprem&&detailAprem.fiche, detailMatin&&detailMatin.fiche, detailJ&&detailJ.fiche)}
       </div>
       ${htmlVacation(detailAprem, 'Équipe Aprem', '🌆', fmtDate(dateAprem))}
@@ -2846,6 +2861,15 @@ function renderFiche(){
         <div><label style="${lbl}">Distribution</label><input type="number" inputmode="numeric" min="0" style="${inp}" value="${l.dist==null?'':l.dist}" oninput="fSet('volumes.${i}.dist',this.value)" /></div>
         <div><label style="${lbl}">Dispersion (auto)</label><div id="fd-${i}" style="${inp};background:#e8f0fb;font-weight:700">${l.dispC==null?'—':fmtN(l.dispC)}</div></div>
       </div>
+      <div style="display:grid;grid-template-columns:1.4fr 1fr;gap:6px;margin-top:8px">
+        <div><label style="${lbl}">Retard de la liaison</label>
+          <select style="${inp}" onchange="fSet('volumes.${i}.retard',this.value)">
+            <option value="" ${!l.retard?'selected':''}>Pas de retard</option>
+            <option value="sans" ${l.retard==='sans'?'selected':''}>Retard — sans impact sur traitement</option>
+            <option value="avec" ${l.retard==='avec'?'selected':''}>Retard — avec impact sur traitement</option>
+          </select></div>
+        <div><label style="${lbl}">Temps de retard</label><input type="text" style="${inp}" placeholder="ex. 45 min" value="${escHtml(l.retard_tps||'')}" oninput="fSet('volumes.${i}.retard_tps',this.value)" /></div>
+      </div>
     </div>`).join('')}
     <button class="btn-primary" style="background:#1a56a0;margin-bottom:12px" onclick="fAddLigne()">+ Ajouter une ligne</button>
 
@@ -2879,6 +2903,15 @@ function renderFiche(){
         <div><label style="${lbl}">Fin camion</label><input type="time" style="${inp}" value="${cm.fin||''}" oninput="fSet('conc.liaisons.${l}.camions.${k}.fin',this.value)" /></div>
         <div><label style="${lbl}">Colis chargés</label><input type="number" inputmode="numeric" min="0" style="${inp}" value="${cm.colis}" oninput="fSet('conc.liaisons.${l}.camions.${k}.colis',this.value)" /></div>
         <button onclick="fDelCamion(${l},${k})" style="padding:9px 10px;background:#fee2e2;color:#dc2626;border:1.5px solid #dc2626;border-radius:8px;font-weight:700">✕</button>
+      </div>
+      <div style="display:grid;grid-template-columns:1.4fr 1fr;gap:6px;margin-bottom:10px">
+        <div><label style="${lbl}">Retard du camion</label>
+          <select style="${inp}" onchange="fSet('conc.liaisons.${l}.camions.${k}.retard',this.value)">
+            <option value="" ${!cm.retard?'selected':''}>Pas de retard</option>
+            <option value="sans" ${cm.retard==='sans'?'selected':''}>Retard — sans impact sur traitement</option>
+            <option value="avec" ${cm.retard==='avec'?'selected':''}>Retard — avec impact sur traitement</option>
+          </select></div>
+        <div><label style="${lbl}">Temps de retard</label><input type="text" style="${inp}" placeholder="ex. 45 min" value="${escHtml(cm.retard_tps||'')}" oninput="fSet('conc.liaisons.${l}.camions.${k}.retard_tps',this.value)" /></div>
       </div>`).join('')}
       <button onclick="fAddCamion(${l})" style="padding:8px 12px;background:white;border:1.5px dashed var(--gris-bord);border-radius:8px;font-size:12px;width:100%">+ Ajouter un camion</button>
       <div style="${tot};margin-top:6px"><span>Colis chargés (liaison ${l+1})</span><strong id="fl-${l}">${fmtN(li.somme)}</strong></div>
@@ -2952,7 +2985,7 @@ function htmlFiche(f, avecConc, eq){
   if(!f || !c.lignes.length){ out += '<p style="color:#9ca3af">Aucun volume saisi.</p>'; }
   else out += `<table style="width:100%;border-collapse:collapse;font-size:11px">
     <tr style="background:#1a56a0;color:white"><th style="${th}">Ligne</th><th style="${th}">Début</th><th style="${th}">Fin</th><th style="${th}">Dispersion</th><th style="${th}">Distribution</th><th style="${th}">Total</th></tr>
-    ${c.lignes.map(l=>`<tr style="border-bottom:1px solid #eee"><td style="${t0}">${escHtml(l.nom||'—')}</td><td style="${t0}">${l.debut||'—'}</td><td style="${t0}">${l.fin||'—'}</td><td style="${t0}">${l.dispC==null?'—':fmtN(l.dispC)}</td><td style="${t0}">${l.distrib==null?'—':fmtN(l.distrib)}</td><td style="${t0};font-weight:bold">${aVal(l.total)?fmtN(nI(l.total)):'—'}</td></tr>`).join('')}
+    ${c.lignes.map(l=>`<tr style="border-bottom:1px solid #eee"><td style="${t0}">${escHtml(l.nom||'—')}</td><td style="${t0}">${l.debut||'—'}</td><td style="${t0}">${l.fin||'—'}</td><td style="${t0}">${l.dispC==null?'—':fmtN(l.dispC)}</td><td style="${t0}">${l.distrib==null?'—':fmtN(l.distrib)}</td><td style="${t0};font-weight:bold">${aVal(l.total)?fmtN(nI(l.total)):'—'}</td></tr>${l.retard?`<tr style="border-bottom:1px solid #eee"><td style="${t0};text-align:left;${l.retard==='avec'?'color:#b91c1c;':''}font-weight:bold" colspan="6">↳ ${escHtml(texteRetard(l))}</td></tr>`:''}`).join('')}
     <tr style="background:#f4f6f9;font-weight:bold"><td style="${t0}" colspan="3">Total équipe</td><td style="${t0}">${fmtN(c.sumDisp)}</td><td style="${t0}">${fmtN(c.sumDist)}</td><td style="${t0}">${fmtN(c.sumTot)}</td></tr>
     <tr><td style="${t0}" colspan="5">HN</td><td style="${t0}">${fmtN(c.hn)}</td></tr>
     <tr style="background:#dcfce7;font-weight:bold"><td style="${t0}" colspan="5">TOTAL COLIS (HN inclus)</td><td style="${t0}">${fmtN(c.totalHN)}</td></tr>
@@ -2962,9 +2995,9 @@ function htmlFiche(f, avecConc, eq){
     if(!c.liaisons.length) out += '<p style="color:#9ca3af">Aucune liaison saisie.</p>';
     else out += `<p style="font-size:11px;margin:0 0 6px">Présents : <b>${aVal(f.conc.presents)?nI(f.conc.presents):'—'}</b></p>
       <table style="width:100%;border-collapse:collapse;font-size:11px">
-      <tr style="background:#0f766e;color:white"><th style="${th}">Liaison</th><th style="${th}">Camion</th><th style="${th}">Début</th><th style="${th}">Fin</th><th style="${th}">Colis chargés</th></tr>
-      ${c.liaisons.map((li,l)=>(li.camions||[]).map((cm,k)=>`<tr style="border-bottom:1px solid #eee"><td style="${t0}">${l+1}</td><td style="${t0}">${k+1}</td><td style="${t0}">${cm.debut||'—'}</td><td style="${t0}">${cm.fin||'—'}</td><td style="${t0}">${aVal(cm.colis)?fmtN(nI(cm.colis)):'—'}</td></tr>`).join('')+`<tr style="background:#f0fdfa;font-weight:bold"><td style="${t0}" colspan="4">Sous-total liaison ${l+1}</td><td style="${t0}">${fmtN(li.somme)}</td></tr>`).join('')}
-      <tr style="background:#ccfbf1;font-weight:bold"><td style="${t0}" colspan="4">TOTAL CHARGÉ CONCENTRATION</td><td style="${t0}">${fmtN(c.totConc)}</td></tr></table>`;
+      <tr style="background:#0f766e;color:white"><th style="${th}">Liaison</th><th style="${th}">Camion</th><th style="${th}">Début</th><th style="${th}">Fin</th><th style="${th}">Colis chargés</th><th style="${th}">Retard</th></tr>
+      ${c.liaisons.map((li,l)=>(li.camions||[]).map((cm,k)=>`<tr style="border-bottom:1px solid #eee"><td style="${t0}">${l+1}</td><td style="${t0}">${k+1}</td><td style="${t0}">${cm.debut||'—'}</td><td style="${t0}">${cm.fin||'—'}</td><td style="${t0}">${aVal(cm.colis)?fmtN(nI(cm.colis)):'—'}</td><td style="${t0};${cm.retard==='avec'?'color:#b91c1c;':''}">${cm.retard?escHtml(texteRetard(cm)):''}</td></tr>`).join('')+`<tr style="background:#f0fdfa;font-weight:bold"><td style="${t0}" colspan="4">Sous-total liaison ${l+1}</td><td style="${t0}">${fmtN(li.somme)}</td><td style="${t0}"></td></tr>`).join('')}
+      <tr style="background:#ccfbf1;font-weight:bold"><td style="${t0}" colspan="4">TOTAL CHARGÉ CONCENTRATION</td><td style="${t0}">${fmtN(c.totConc)}</td><td style="${t0}"></td></tr></table>`;
   }
   if(f && (f.commentaire||f.passation)) out += h('💬 Commentaire et passation') + (f.commentaire?`<p style="margin:0 0 6px"><b>Événements :</b> ${escHtml(f.commentaire)}</p>`:'') + (f.passation?`<p style="margin:0"><b>Consignes équipe suivante :</b> ${escHtml(f.passation)}</p>`:'');
   return out;
@@ -3027,9 +3060,9 @@ function preparerKPI(raw){
       x.anos.length, x.epis.filter(e=>e.nom_prenom&&e.nom_prenom!=='RAS').length, trnRes.length, trnRes.filter(t=>t.resultat!=='OK').length]);
     const hasPres = f && aVal(f.presents);
     const anoN = code => x.anos.filter(a=>(a.type_anomalie||'AUTRE')===code).length;
-    const tNom = x.anos.filter(a=>!['ERA','PU','SP','MEP','FACTEO'].includes(a.type_anomalie||'AUTRE')).length;
+    const tNom = x.anos.filter(a=>!['ERA','PU','SP','MEP','FACTEO','RAQ','SEC'].includes(a.type_anomalie||'AUTRE')).length;
     const ea = hasPres&&prev!=null?effAbs(f, prev, f.presents):null;
-    const lignesTxt = c.lignes.filter(l=>aVal(l.total)).map(l=>[l.debut||'', l.fin||'', l.dispC==null?'':l.dispC, l.distrib==null?'':l.distrib].join(';')).join('|');
+    const lignesTxt = c.lignes.filter(l=>aVal(l.total)).map(l=>[l.debut||'', l.fin||'', l.dispC==null?'':l.dispC, l.distrib==null?'':l.distrib, l.retard==='avec'?'A':(l.retard==='sans'?'S':''), (l.retard_tps||'').replace(/[|;\r\n]+/g,' ').trim()].join(';')).join('|');
     P.kpi.push({cle:v.date+'|'+eq, date:v.date, lundi:lun, equipe:eq, lignes: lignesTxt||null, conc_lignes:null,
       absents: ea?ea.absN:null, base_eff: ea?ea.base:null,
       prevus: hasPres&&prev!=null?prev:null, presents: hasPres?nI(f.presents):null, interimaires: f&&aVal(f.interim)?nI(f.interim):null,
@@ -3037,14 +3070,14 @@ function preparerKPI(raw){
       dispersion: f&&c.lignes.length?c.sumDisp:null, distribution: f&&c.lignes.length?c.sumDist:null, hn: f&&aVal(f.hn)?c.hn:null,
       total_colis: f&&(c.lignes.length||aVal(f.hn))?c.totalHN:null, colis_charges:null,
       cadence: rel.length?(calcMoyenneColisArchive(x.colis)||null):null, releves: rel.length, sous_objectif: rel.filter(c2=>c2.cadence_ok===false).length,
-      arret_min: Object.values(sess).reduce((a,b)=>a+b,0), anomalies:x.anos.length, ano_era:anoN('ERA'), ano_pu:anoN('PU'), ano_sp:anoN('SP'), ano_mep:anoN('MEP'), ano_facteo:anoN('FACTEO'), ano_autre:tNom,
+      arret_min: Object.values(sess).reduce((a,b)=>a+b,0), anomalies:x.anos.length, ano_era:anoN('ERA'), ano_pu:anoN('PU'), ano_sp:anoN('SP'), ano_mep:anoN('MEP'), ano_facteo:anoN('FACTEO'), ano_raq:anoN('RAQ'), ano_secu:anoN('SEC'), raq: x.anos.filter(a=>a.type_anomalie==='RAQ').map(a=>[(a.description||'').trim(),(a.brin_mep||'').trim()?'('+a.brin_mep.trim()+')':''].filter(Boolean).join(' ').replace(/[|;\r\n]+/g,' ')).join('|')||null, ano_autre:tNom,
       epi: x.epis.filter(e=>e.nom_prenom&&e.nom_prenom!=='RAS').length, tournees:trnRes.length, tournees_nok:trnRes.filter(t=>t.resultat!=='OK').length});
     if(f && /^aprem$/i.test(eq) && (aVal(f.conc.presents) || c.liaisons.length)){
       P.kpi.push({cle:v.date+'|Concentration', date:v.date, lundi:lun, equipe:'Concentration', lignes:null,
-        conc_lignes: (c.liaisons||[]).reduce((a,li)=>a.concat(li.camions||[]),[]).filter(cm=>aVal(cm.colis)).map(cm=>[cm.debut||'', cm.fin||'', nI(cm.colis)].join(';')).join('|')||null,
+        conc_lignes: (c.liaisons||[]).reduce((a,li)=>a.concat((li.camions||[]).map(cm=>({cm,li}))),[]).filter(x=>aVal(x.cm.colis)).map(x=>[x.cm.debut||'', x.cm.fin||'', nI(x.cm.colis), x.cm.retard==='avec'?'A':(x.cm.retard==='sans'?'S':''), (x.cm.retard_tps||'').replace(/[|;\r\n]+/g,' ').trim()].join(';')).join('|')||null,
         prevus: aVal(f.conc.presents)?(aVal(f.conc.prevus)?nI(f.conc.prevus):PREVUS_DEFAUT.conc):null, presents: aVal(f.conc.presents)?nI(f.conc.presents):null, interimaires: aVal(f.conc.interim)?nI(f.conc.interim):null,
         cible_tri:null, fin_tri:null, ecart_fin:null, dispersion:null, distribution:null, hn:null, total_colis:null, colis_charges:c.totConc, cadence:null, releves:0, sous_objectif:0, arret_min:0,
-        anomalies:0, ano_era:0, ano_pu:0, ano_sp:0, ano_mep:0, ano_facteo:0, ano_autre:0, epi:0, tournees:0, tournees_nok:0,
+        anomalies:0, ano_era:0, ano_pu:0, ano_sp:0, ano_mep:0, ano_facteo:0, ano_raq:0, ano_secu:0, raq:null, ano_autre:0, epi:0, tournees:0, tournees_nok:0,
         absents: aVal(f.conc.presents)?Math.max(0,(aVal(f.conc.prevus)?nI(f.conc.prevus):PREVUS_DEFAUT.conc)-nI(f.conc.presents)):null, base_eff: aVal(f.conc.presents)?(aVal(f.conc.prevus)?nI(f.conc.prevus):PREVUS_DEFAUT.conc):null});
       P.vac.push([{d:v.date},{d:lun},'Concentration',chef, !aVal(f.conc.presents)?'':(aVal(f.conc.prevus)?nI(f.conc.prevus):PREVUS_DEFAUT.conc), aVal(f.conc.presents)?nI(f.conc.presents):'', aVal(f.conc.interim)?nI(f.conc.interim):'',
         '','','','','','','', c.totConc, '','','','','','','','']);
@@ -3270,7 +3303,9 @@ const INDIC = [
   {id:'ano_pu',g:'⚠️ Anomalies',l:'P.U',u:'',pol:-1,f:r=>_sum(r,'ano_pu')},
   {id:'ano_sp',g:'⚠️ Anomalies',l:'So Poste',u:'',pol:-1,f:r=>_sum(r,'ano_sp')},
   {id:'ano_mep',g:'⚠️ Anomalies',l:'Mise en place',u:'',pol:-1,f:r=>_sum(r,'ano_mep')},
+  {id:'ano_raq',opt:1,g:'⚠️ Anomalies',l:'Reste à quai',u:'',pol:-1,f:r=>_sum(r,'ano_raq')},
   {id:'ano_facteo',g:'⚠️ Anomalies',l:'Facteo',u:'',pol:-1,f:r=>_sum(r,'ano_facteo')},
+  {id:'ano_secu',opt:1,g:'⚠️ Anomalies',l:'Sécurité',u:'',pol:-1,f:r=>_sum(r,'ano_secu')},
   {id:'ano_autre',g:'⚠️ Anomalies',l:'Autres',u:'',pol:-1,f:r=>_sum(r,'ano_autre')},
   {id:'epi',g:'⚠️ Anomalies',l:'Manquements EPI',u:'',pol:-1,f:r=>_sum(r,'epi')},
 ];
@@ -3454,7 +3489,7 @@ function envoyerNotif(titre, corps){
 }
 
 // ── CLÔTURE AUTOMATIQUE ─────────────────────────────────────────
-// Aprem → clôture à 01h00 / Matin → clôture à 09h00
+// Aprem → clôture à 01h30 / Matin → clôture à 09h00
 let clotureAutoInterval = null;
 
 function demarrerClotureAuto(){
@@ -3483,11 +3518,11 @@ async function verifierClotureAuto(){
   const totalMin = h*60+m;
 
   // Seuils de clôture automatique
-  // Aprem : clôture auto à 01h00 (si pas encore clôturée manuellement)
+  // Aprem : clôture auto à 01h30 (si pas encore clôturée manuellement)
   // Matin : clôture auto à 09h00 (si pas encore clôturée manuellement)
   let doitClore = false;
   // Fenêtres de clôture : sinon la vacation se fermait dès l'ouverture de l'application pendant la vacation (ex. Aprem à 17h)
-  if(equipe === 'Aprem' && !fenetreSaisieOuverte('Aprem')) doitClore = true; // de 01h00 à 16h00
+  if(equipe === 'Aprem' && !fenetreSaisieOuverte('Aprem')) doitClore = true; // de 01h30 à 16h00
   if(equipe === 'Matin' && !fenetreSaisieOuverte('Matin')) doitClore = true; // à partir de 09h00
   if(equipe === 'Journée' && !fenetreSaisieOuverte('Journée')) doitClore = true; // après 20h00
 
